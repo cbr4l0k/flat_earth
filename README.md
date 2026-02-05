@@ -1,4 +1,4 @@
-<img src="./assets/logo.png" style="width:700px" alt="The Flat Earth">
+<img src="./assets/logo.png" style="width:400px" alt="The Flat Earth">
 
 
 # Flat Earth
