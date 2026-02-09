@@ -10,34 +10,32 @@ Fizzy implements custom passwordless authentication from scratch. No passwords a
 
 ### The Magic Link Flow
 
-```
-Browser                     Server                    Email Service
-  │                           │                            │
-  │── GET /session/new ──────►│                            │
-  │◄── login form ────────────│                            │
-  │                           │                            │
-  │── POST /session ─────────►│                            │
-  │   { email }               │── find/create Identity ───►│
-  │                           │── create MagicLink ───────►│
-  │                           │── send email ─────────────►│
-  │◄── redirect + set ────────│                   │── deliver 6-digit code ──►
-  │    encrypted cookie       │                            │
-  │    (pending_auth_token)   │                            │
-  │                           │                            │
-  │── POST /magic_link ──────►│                            │
-  │   { code: "482901" }      │── MagicLink.consume(code) ─►
-  │                           │── verify email matches ────►
-  │                           │── create Session ──────────►
-  │◄── redirect + set ────────│                            │
-  │    signed cookie          │                            │
-  │    (session_token)        │                            │
-  │                           │                            │
-  │── GET /0001234567/ ──────►│                            │
-  │                           │── read signed cookie ──────►
-  │                           │── find Session ────────────►
-  │                           │── set Current.session ─────►
-  │                           │── set Current.identity ────►
-  │◄── dashboard ─────────────│                            │
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant S as Rails Server
+    participant E as Email Service
+
+    B->>S: GET /session/new
+    S-->>B: Login form
+
+    B->>S: POST /session { email }
+    S->>S: Find/create Identity
+    S->>S: Create MagicLink (6-digit code)
+    S->>E: Send email with code
+    S-->>B: Redirect + set encrypted cookie (pending_auth_token)
+    E-->>B: Deliver 6-digit code to inbox
+
+    B->>S: POST /magic_link { code: "482901" }
+    S->>S: MagicLink.consume(code)
+    S->>S: Verify email matches cookie
+    S->>S: Create Session record
+    S-->>B: Redirect + set signed cookie (session_token)
+
+    B->>S: GET /0001234567/ (dashboard)
+    S->>S: Read signed cookie → find Session
+    S->>S: Set Current.session + Current.identity
+    S-->>B: Dashboard HTML
 ```
 
 ### The Six Auth Tables
@@ -103,44 +101,26 @@ The `Authentication` concern, signed cookies, encrypted cookies, secure comparis
 
 Here is the full architecture for every authenticated request in our app:
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         BROWSER                                     │
-│                                                                     │
-│  ┌─────────────────┐     ┌──────────────────────────────────────┐  │
-│  │   Clerk SDK     │     │         React App                    │  │
-│  │                 │     │                                      │  │
-│  │  Sign in/up UI  │────►│  useQuery(api.boards.list,           │  │
-│  │  Session mgmt   │     │    { accountId })                    │  │
-│  │  Token refresh  │     │                                      │  │
-│  └─────────────────┘     └──────────────┬───────────────────────┘  │
-│                                          │ JWT attached             │
-│                                          │ automatically            │
-└──────────────────────────────────────────┼──────────────────────────┘
-                                           │
-                                           ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                        CONVEX BACKEND                               │
-│                                                                     │
-│  1. Validate JWT against Clerk's public keys (automatic)            │
-│  2. Populate ctx.auth with identity data                            │
-│                                                                     │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │  ctx.auth.getUserIdentity()                                  │   │
-│  │  → { subject: "clerk_123", email: "me@test.com", ... }      │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-│                          │                                          │
-│                          ▼                                          │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │  requireAccountAccess(ctx, accountId)                        │   │
-│  │  → Look up users table: clerkId + accountId → User doc      │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-│                          │                                          │
-│                          ▼                                          │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │  Your business logic runs with a verified User document      │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+stateDiagram-v2
+    state "BROWSER" as browser {
+        state "Clerk SDK<br/>(sign in/up, session mgmt, token refresh)" as clerk
+        state "React App<br/>useQuery(api.boards.list, { accountId })" as react
+        clerk --> react : Auth state
+    }
+
+    state "CONVEX BACKEND" as convex {
+        state "Validate JWT against Clerk's public keys<br/>(automatic)" as validate
+        state "ctx.auth.getUserIdentity()<br/>→ { subject, email, name, ... }" as identity
+        state "requireAccountAccess(ctx, accountId)<br/>→ Look up users table: clerkId + accountId → User doc" as access
+        state "Your business logic<br/>runs with a verified User document" as logic
+
+        validate --> identity
+        identity --> access
+        access --> logic
+    }
+
+    react --> validate : JWT attached automatically
 ```
 
 The key insight: **we write zero auth plumbing**. The Clerk SDK attaches JWTs to every Convex request automatically. Convex validates them automatically. We only write the Identity → User lookup (the business logic part).
@@ -198,16 +178,25 @@ export default {
 
 ### 2. Set Environment Variables
 
-In the Convex dashboard (Settings → Environment Variables), set:
+First, get the Issuer URL from Clerk:
+
+1. In the Clerk dashboard, go to **JWT Templates** (left sidebar)
+2. Click **New template** → select **Convex**
+3. The **Issuer** URL is displayed on the template page — this is your Clerk app's Frontend API URL (e.g., `https://verb-noun-00.clerk.accounts.dev`)
+4. Save the template — the JWT token name must remain `convex` (do not rename it)
+
+> **Important:** The Issuer URL is *not* the same as the Clerk Domain from the API Keys page. It comes specifically from the JWT Templates section.
+
+Now set it in Convex. In the Convex dashboard (Settings → Environment Variables), set:
 
 ```
-CLERK_ISSUER_URL=https://your-app.clerk.accounts.dev
+CLERK_ISSUER_URL=https://verb-noun-00.clerk.accounts.dev
 ```
 
 Or via CLI:
 
 ```bash
-bunx convex env set CLERK_ISSUER_URL https://your-app.clerk.accounts.dev
+bunx convex env set CLERK_ISSUER_URL https://verb-noun-00.clerk.accounts.dev
 ```
 
 ### 3. How JWT Validation Works
@@ -280,14 +269,19 @@ This is the critical pattern. Clerk gives you a global identity (like Fizzy's `I
 
 ### The Flow
 
-```
-Clerk Identity (global)          Your Convex Users Table (per-account)
-┌──────────────────────┐         ┌─────────────────────────────────────┐
-│ subject: "clerk_123" │   1:N   │ { clerkId: "clerk_123",            │
-│ email: "me@test.com" │ ──────► │   accountId: account_A, role: "owner" } │
-│ name: "Alice"        │         │ { clerkId: "clerk_123",            │
-└──────────────────────┘         │   accountId: account_B, role: "member" } │
-                                 └─────────────────────────────────────┘
+```mermaid
+stateDiagram-v2
+    state "Clerk Identity (global)" as clerk {
+        state "subject: clerk_123<br/>email: me@test.com<br/>name: Alice" as id
+    }
+
+    state "Convex users table (per-account)" as users {
+        state "clerkId: clerk_123<br/>accountId: account_A<br/>role: owner" as userA
+        state "clerkId: clerk_123<br/>accountId: account_B<br/>role: member" as userB
+    }
+
+    clerk --> userA
+    clerk --> userB
 ```
 
 One Clerk identity can have multiple User documents — one per account they belong to.
