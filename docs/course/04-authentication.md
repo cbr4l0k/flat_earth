@@ -4,23 +4,146 @@
 >
 > **Reference:** [docs/fizzy-analysis/03-authentication-and-sessions.md](../fizzy-analysis/03-authentication-and-sessions.md)
 
-## Fizzy's Auth Model (What We're Replacing)
+## How Fizzy Does It
 
-Fizzy implements custom passwordless authentication:
+Fizzy implements custom passwordless authentication from scratch. No passwords anywhere — users authenticate via 6-digit magic codes sent by email. The system needs **six database tables** and a stack of Rails controllers, concerns, and models to make this work.
 
-1. User enters email → receives 6-digit code → verifies code → gets session cookie
-2. **Identity** = global user (email-based, not tenant-scoped)
-3. **User** = account membership (Identity + Account + role)
-4. **Session** = browser session (signed cookie with Rails `signed_id`)
+### The Magic Link Flow
 
-We keep the same **Identity/User split** but delegate the auth infrastructure to Clerk. Clerk handles magic links, email verification, session management, and JWTs. We handle the User (account membership) model ourselves in Convex.
+```
+Browser                     Server                    Email Service
+  │                           │                            │
+  │── GET /session/new ──────►│                            │
+  │◄── login form ────────────│                            │
+  │                           │                            │
+  │── POST /session ─────────►│                            │
+  │   { email }               │── find/create Identity ───►│
+  │                           │── create MagicLink ───────►│
+  │                           │── send email ─────────────►│
+  │◄── redirect + set ────────│                   │── deliver 6-digit code ──►
+  │    encrypted cookie       │                            │
+  │    (pending_auth_token)   │                            │
+  │                           │                            │
+  │── POST /magic_link ──────►│                            │
+  │   { code: "482901" }      │── MagicLink.consume(code) ─►
+  │                           │── verify email matches ────►
+  │                           │── create Session ──────────►
+  │◄── redirect + set ────────│                            │
+  │    signed cookie          │                            │
+  │    (session_token)        │                            │
+  │                           │                            │
+  │── GET /0001234567/ ──────►│                            │
+  │                           │── read signed cookie ──────►
+  │                           │── find Session ────────────►
+  │                           │── set Current.session ─────►
+  │                           │── set Current.identity ────►
+  │◄── dashboard ─────────────│                            │
+```
+
+### The Six Auth Tables
+
+Fizzy needs all of these to support the flow above:
+
+| Table | Purpose | Key Fields |
+|-------|---------|------------|
+| `identities` | Global user (email-based, not tenant-scoped) | `email_address`, `verified` |
+| `sessions` | Active browser session | `identity_id`, `user_agent`, `ip_address` |
+| `magic_links` | Short-lived 6-digit codes | `identity_id`, `code`, `purpose`, `expires_at` |
+| `signups` | New account registration state | `identity_id`, `account_name` |
+| `access_tokens` | API bearer tokens | `identity_id`, `token`, `permission` |
+| `join_codes` | Invitation links for joining accounts | `account_id`, `code`, `usage_count`, `usage_limit` |
+
+On top of these tables, Fizzy needs:
+
+- **`Authentication` concern** — included in every controller, handles session resume, cookie management, and bearer token fallback
+- **Rate limiting** — 10 requests per 3 minutes on login/signup endpoints
+- **Signed cookies** — `httponly`, `same_site: :lax`, using Rails' `signed_id`
+- **Encrypted cookies** — for the pending auth token (prevents code-swap attacks)
+- **Secure comparison** — `ActiveSupport::SecurityUtils.secure_compare` for email matching
+- **Cleanup jobs** — recurring task every 4 hours to delete expired magic links
+
+### Session Management
+
+Every subsequent request after login follows this path:
+
+1. Browser sends the `session_token` signed cookie
+2. Rails reads the cookie, verifies the signature
+3. Finds the `Session` record via `signed_id`
+4. Sets `Current.session` and `Current.identity` (thread-locals)
+5. Controllers access `Current.identity` to know who's making the request
+
+This is ~300 lines of carefully written security code.
+
+## What Clerk Eliminates
+
+Every one of those six tables disappears:
+
+| Fizzy Table | What It Does | Clerk Replacement |
+|-------------|-------------|-------------------|
+| `identities` | Stores email, verified flag | Clerk User (hosted) |
+| `sessions` | Tracks browser sessions | Clerk session management |
+| `magic_links` | Short-lived 6-digit codes | Clerk email OTP / magic links |
+| `signups` | Registration state machine | Clerk sign-up flow |
+| `access_tokens` | API bearer tokens | Clerk API tokens |
+| `join_codes` | Invitation links | We handle this ourselves in Module 05 |
+
+**Result:** 6 auth tables → 0 auth tables in our schema. We keep only the `users` table (account membership), which is a business concern, not an auth concern.
+
+The `Authentication` concern, signed cookies, encrypted cookies, secure comparison, rate limiting, and magic link cleanup jobs all disappear too. Clerk handles all of it.
 
 ## Why Clerk
 
-- Passwordless auth (magic links, email OTP) out of the box — matches Fizzy's approach
-- Built-in Convex integration (JWT validation)
-- Handles session management, token refresh, multi-device
-- Organizations feature maps to Fizzy's accounts (optional — we'll manage accounts ourselves for flexibility)
+- **Passwordless auth** (magic links, email OTP) out of the box — matches Fizzy's approach
+- **Built-in Convex integration** — JWT validation with zero plumbing
+- **Session management** — token refresh, multi-device, secure cookies handled automatically
+- **Organizations feature** — maps to Fizzy's accounts (optional — we'll manage accounts ourselves for flexibility)
+- **Production-ready security** — rate limiting, bot detection, CSRF protection included
+
+## How Convex + Clerk Work Together
+
+Here is the full architecture for every authenticated request in our app:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         BROWSER                                     │
+│                                                                     │
+│  ┌─────────────────┐     ┌──────────────────────────────────────┐  │
+│  │   Clerk SDK     │     │         React App                    │  │
+│  │                 │     │                                      │  │
+│  │  Sign in/up UI  │────►│  useQuery(api.boards.list,           │  │
+│  │  Session mgmt   │     │    { accountId })                    │  │
+│  │  Token refresh  │     │                                      │  │
+│  └─────────────────┘     └──────────────┬───────────────────────┘  │
+│                                          │ JWT attached             │
+│                                          │ automatically            │
+└──────────────────────────────────────────┼──────────────────────────┘
+                                           │
+                                           ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                        CONVEX BACKEND                               │
+│                                                                     │
+│  1. Validate JWT against Clerk's public keys (automatic)            │
+│  2. Populate ctx.auth with identity data                            │
+│                                                                     │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  ctx.auth.getUserIdentity()                                  │   │
+│  │  → { subject: "clerk_123", email: "me@test.com", ... }      │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                          │                                          │
+│                          ▼                                          │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  requireAccountAccess(ctx, accountId)                        │   │
+│  │  → Look up users table: clerkId + accountId → User doc      │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                          │                                          │
+│                          ▼                                          │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  Your business logic runs with a verified User document      │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+The key insight: **we write zero auth plumbing**. The Clerk SDK attaches JWTs to every Convex request automatically. Convex validates them automatically. We only write the Identity → User lookup (the business logic part).
 
 ## Setup Clerk
 
@@ -45,6 +168,16 @@ From the Clerk dashboard, copy:
 ```bash
 bun add @clerk/clerk-react
 ```
+
+### 4. Configure Frontend Environment
+
+Create `.env.local` in your project root with the Clerk publishable key:
+
+```
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_your-key-here
+```
+
+This key is safe to expose in the browser — it only identifies your Clerk app.
 
 ## Configure Convex + Clerk
 
@@ -119,7 +252,7 @@ export const whoami = query({
 
 `ctx.auth.getUserIdentity()` returns:
 - `null` if the request is unauthenticated
-- An `UserIdentity` object with Clerk user data if authenticated
+- A `UserIdentity` object with Clerk user data if authenticated
 
 The `subject` field is the Clerk user ID — this is stable across sessions and is what we store as `clerkId` in our `users` table.
 
@@ -159,25 +292,33 @@ Clerk Identity (global)          Your Convex Users Table (per-account)
 
 One Clerk identity can have multiple User documents — one per account they belong to.
 
-### The `getCurrentUser` Helper
+### The `requireAccountAccess` Helper
 
 This is the most important helper in the entire app. Almost every function will call it:
 
 ```typescript
 // convex/lib/auth.ts
 import { QueryCtx, MutationCtx } from "../_generated/server";
-import { ConvexError, v } from "convex/values";
+import { ConvexError } from "convex/values";
 import { Doc, Id } from "../_generated/dataModel";
 
-export async function getCurrentUser(
+export async function requireAccountAccess(
   ctx: QueryCtx | MutationCtx,
   accountId: Id<"accounts">,
 ): Promise<Doc<"users">> {
+  // 1. Check Clerk authentication
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) {
     throw new ConvexError("Not authenticated");
   }
 
+  // 2. Check account exists
+  const account = await ctx.db.get(accountId);
+  if (!account) {
+    throw new ConvexError("Account not found");
+  }
+
+  // 3. Check user has membership in this account
   const user = await ctx.db
     .query("users")
     .withIndex("by_account_clerk", (q) =>
@@ -185,13 +326,22 @@ export async function getCurrentUser(
     )
     .unique();
 
-  if (!user || !user.active) {
-    throw new ConvexError("No active user in this account");
+  if (!user) {
+    throw new ConvexError("Not a member of this account");
+  }
+
+  if (!user.active) {
+    throw new ConvexError("User is deactivated");
   }
 
   return user;
 }
 ```
+
+This does three things in one call:
+1. Verifies Clerk authentication (throws if no JWT)
+2. Verifies the account exists (throws if bad ID)
+3. Verifies the user belongs to that account and is active (throws with specific errors)
 
 Usage in any function:
 
@@ -199,7 +349,7 @@ Usage in any function:
 export const listBoards = query({
   args: { accountId: v.id("accounts") },
   handler: async (ctx, { accountId }) => {
-    const user = await getCurrentUser(ctx, accountId);
+    const user = await requireAccountAccess(ctx, accountId);
     // user is guaranteed to be an active user in this account
     // ... fetch boards ...
   },
@@ -229,7 +379,7 @@ export const createWithOwner = mutation({
     // Create the account
     const accountId = await ctx.db.insert("accounts", {
       name: accountName,
-      cardsCount: 0,
+      cardsCount: 0n,
     });
 
     // Create the owner user
@@ -276,6 +426,8 @@ export const createWithOwner = mutation({
 });
 ```
 
+> **Note:** `cardsCount` uses `0n` (BigInt literal) because the schema defines it as `v.int64()`. Using `0` instead of `0n` would cause a runtime type error.
+
 ### Listing Accounts for a Clerk User
 
 When a user has multiple accounts, show an account picker:
@@ -307,93 +459,68 @@ export const listMyAccounts = query({
 });
 ```
 
-## Joining an Existing Account
+## Account Membership
 
-Like Fizzy's join codes, allow users to join an account:
-
-```typescript
-// convex/accounts.ts
-export const join = mutation({
-  args: {
-    accountId: v.id("accounts"),
-  },
-  handler: async (ctx, { accountId }) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new ConvexError("Not authenticated");
-
-    // Check account exists
-    const account = await ctx.db.get(accountId);
-    if (!account) throw new ConvexError("Account not found");
-
-    // Check user doesn't already exist in this account
-    const existing = await ctx.db
-      .query("users")
-      .withIndex("by_account_clerk", (q) =>
-        q.eq("accountId", accountId).eq("clerkId", identity.subject)
-      )
-      .unique();
-
-    if (existing) throw new ConvexError("Already a member");
-
-    // Create user with member role
-    const userId = await ctx.db.insert("users", {
-      accountId,
-      clerkId: identity.subject,
-      name: identity.name ?? "New Member",
-      role: "member",
-      active: true,
-    });
-
-    // Auto-grant access to all_access boards
-    const publicBoards = await ctx.db
-      .query("boards")
-      .withIndex("by_account", (q) => q.eq("accountId", accountId))
-      .collect();
-
-    for (const board of publicBoards.filter((b) => b.allAccess)) {
-      await ctx.db.insert("accesses", {
-        accountId,
-        boardId: board._id,
-        userId,
-        involvement: "access_only",
-      });
-    }
-
-    return userId;
-  },
-});
-```
+Joining an existing account (via join codes or invitations) is a multi-tenancy concern. We cover the `join` mutation, join code management, and invitation flow in [Module 05 — Multi-Tenancy](./05-multi-tenancy.md).
 
 ## Authentication Patterns Summary
 
 | Pattern | When to Use |
 |---------|-------------|
 | `ctx.auth.getUserIdentity()` | Raw Clerk identity access |
-| `getCurrentUser(ctx, accountId)` | Most functions — gets account-scoped user |
+| `requireAccountAccess(ctx, accountId)` | Most functions — gets account-scoped user |
 | `requireAuth(ctx)` | Functions that just need auth but not account context |
 | Unauthenticated queries | Public board views, health checks |
 
-Every query and mutation that reads or writes tenant data should call `getCurrentUser` with the `accountId` argument. This is the Convex equivalent of Fizzy's `Current.user`.
+Every query and mutation that reads or writes tenant data should call `requireAccountAccess` with the `accountId` argument. This is the Convex equivalent of Fizzy's `Current.user`.
+
+## Fizzy's Approach vs Ours
+
+| Aspect | Fizzy (Rails) | Flat Earth (Convex + Clerk) |
+|--------|---------------|----------------------------|
+| Auth method | Custom magic links (6-digit codes) | Clerk email OTP (same UX, zero code) |
+| Auth tables | 6 (`identities`, `sessions`, `magic_links`, `signups`, `access_tokens`, `join_codes`) | 0 (all handled by Clerk) |
+| Session storage | Signed cookies + `sessions` table | Clerk manages sessions + JWTs |
+| Token validation | Rails `signed_id` + custom concern | Convex validates Clerk JWTs automatically |
+| Identity model | `Identity` record (email-based) | Clerk User (hosted) |
+| User model | `User` record (account-scoped) | Same — `users` table with `clerkId` + `accountId` |
+| Multi-account switching | Signed transfer IDs (4-hour expiry) | Same Clerk session, switch `accountId` in frontend |
+| Rate limiting | Custom `rate_limit` controller macro | Clerk built-in bot/abuse protection |
+| API auth | Bearer tokens via `access_tokens` table | Clerk API tokens |
+| Security code | ~300 lines of concerns, models, controllers | ~30 lines (`requireAccountAccess` helper) |
 
 ## Exercise: Set Up Authentication
 
-1. **Create a Clerk app** at [clerk.com](https://clerk.com) with email-only sign-in
+### Part 1 — Clerk Setup (~10 min)
 
-2. **Configure Convex auth**: Create `convex/auth.config.ts` with your Clerk domain, set the `CLERK_ISSUER_URL` environment variable
+1. Create a Clerk app at [clerk.com](https://clerk.com) with email-only sign-in
+2. Add your Clerk publishable key to `.env.local`
+3. Install `@clerk/clerk-react`
 
-3. **Write `getCurrentUser` helper** in `convex/lib/auth.ts`
+### Part 2 — Convex Integration (~5 min)
 
-4. **Write `createWithOwner` mutation** in `convex/accounts.ts` that creates an account, owner user, and default board with columns
+1. Create `convex/auth.config.ts` with your Clerk domain
+2. Set the `CLERK_ISSUER_URL` environment variable in the Convex dashboard
 
-5. **Write `listMyAccounts` query** that returns all accounts for the current Clerk user
+### Part 3 — Auth Helper (~15 min)
 
-6. **Test the flow**:
-   - Open the Convex dashboard
-   - Manually insert a user document with a test `clerkId`
-   - Use the Functions tab to call `listMyAccounts` (it won't work without a real Clerk token — but verify the function compiles and deploys)
-   - Test `createWithOwner` via the dashboard
+1. Write the `requireAccountAccess` helper in `convex/lib/auth.ts`
+2. Make sure it checks: authentication → account existence → membership → active status
+3. Use separate error messages for each failure case
 
-The real end-to-end test with Clerk tokens happens when we wire up the frontend in Module 12.
+### Part 4 — Account Creation (~15 min)
+
+1. Write `createWithOwner` mutation in `convex/accounts.ts` — creates an account, owner user, and default board with columns
+2. Remember: `cardsCount: 0n` (BigInt), not `cardsCount: 0`
+3. Write `listMyAccounts` query that returns all accounts for the current Clerk user
+
+### Part 5 — Verify (~5 min)
+
+1. Run `bunx convex dev` and confirm all functions deploy without errors
+2. Open the Convex dashboard → Functions tab
+3. Call `createWithOwner` and `listMyAccounts` to verify they compile and appear in the dashboard
+
+End-to-end testing with real Clerk tokens happens when we wire up the frontend in Module 12.
 
 ---
 
