@@ -8,23 +8,15 @@
 
 Fizzy's card lifecycle is derived from multiple fields, not a single status column:
 
-```
-                    ┌──────────┐
-                    │ drafted  │  card.status === "drafted"
-                    └────┬─────┘
-                         │ publish()
-                         ▼
-                    ┌──────────┐
-            ┌──────│  active   │◄─────┐
-            │      └──┬────┬──┘      │
-            │  close() │    │ postpone()
-            │         ▼    ▼         │
-            │    ┌────────┐ ┌──────┐ │
-            │    │ closed │ │not_now│ │
-            │    └───┬────┘ └──┬───┘ │
-            │ reopen()│  resume()│     │
-            │        └─────────┘     │
-            └────────────────────────┘
+```mermaid
+stateDiagram-v2
+    [*] --> drafted
+    drafted --> active : publish()
+    active --> closed : close()
+    active --> not_now : postpone()
+    closed --> active : reopen()
+    not_now --> active : resume()
+    active --> active : triageInto()
 ```
 
 ### Derived Status

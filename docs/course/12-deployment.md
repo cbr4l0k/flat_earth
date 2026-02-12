@@ -20,7 +20,7 @@ Three services, each with its own production configuration:
 |---------|-----|------------|
 | **Convex** | `npx convex dev` (dev deployment) | `npx convex deploy` (production deployment) |
 | **Clerk** | Development instance (test mode) | Production instance (real email delivery) |
-| **Frontend** | `npm run dev` (localhost:3000) | Vercel (global CDN) |
+| **Frontend** | `bun dev` (localhost:3000) | Vercel (global CDN) |
 
 ## Step 1: Convex Production Deployment
 
@@ -128,13 +128,13 @@ npx convex env set CLERK_ISSUER_URL https://your-production-domain.clerk.account
 ### Option B: Vercel CLI
 
 ```bash
-npm i -g vercel
+bun i -g vercel
 vercel
 ```
 
 Follow the prompts. Vercel will:
 - Detect the framework (Vite / TanStack Start)
-- Run `npm run build`
+- Run `bun run build`
 - Deploy the output
 
 ### Environment Variables in Vercel
@@ -162,7 +162,7 @@ Your `package.json` should have:
 }
 ```
 
-Vercel runs `npm run build` automatically on each push to main.
+Vercel runs `bun run build` automatically on each push to main.
 
 ### Custom Domain
 

@@ -330,39 +330,33 @@ test("can create a board", async ({ page }) => {
 
 ## Architecture Recap
 
-```
-┌─────────────────────────────────────────────────┐
-│                   Vercel CDN                      │
-│          TanStack Start (React SSR/CSR)           │
-│                                                   │
-│  ┌─────────────┐  ┌──────────┐  ┌─────────────┐ │
-│  │ Routes       │  │ shadcn/ui│  │ @dnd-kit    │ │
-│  │ (file-based) │  │ Tailwind │  │ drag & drop │ │
-│  └──────┬──────┘  └──────────┘  └─────────────┘ │
-│         │ useQuery / useMutation                  │
-└─────────┼─────────────────────────────────────────┘
-          │ WebSocket (automatic)
-┌─────────┼─────────────────────────────────────────┐
-│         ▼        Convex Cloud                      │
-│  ┌──────────┐  ┌──────────┐  ┌────────────────┐  │
-│  │ Queries  │  │ Mutations│  │ Actions        │  │
-│  │ (reads)  │  │ (writes) │  │ (external APIs)│  │
-│  └────┬─────┘  └────┬─────┘  └────────────────┘  │
-│       │              │                             │
-│  ┌────┴──────────────┴─────┐  ┌────────────────┐ │
-│  │   Document Database     │  │ Scheduler/Crons│ │
-│  │   (indexes, search)     │  │ (entropy, etc) │ │
-│  └─────────────────────────┘  └────────────────┘ │
-│                                                    │
-│  ┌─────────────────────────────────────────────┐  │
-│  │  File Storage (images, exports)              │  │
-│  └─────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────┘
-          │ JWT verification
-┌─────────┼─────────────────────────────────────────┐
-│         ▼           Clerk                          │
-│  Authentication, sessions, user management         │
-└────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph Vercel["Vercel CDN"]
+        TS["TanStack Start — React SSR/CSR"]
+        Routes["Routes (file-based)"]
+        UI["shadcn/ui · Tailwind"]
+        DND["@dnd-kit drag & drop"]
+        TS --> Routes
+        TS --> UI
+        TS --> DND
+    end
+
+    subgraph Convex["Convex Cloud"]
+        Q2["Queries (reads)"]
+        M2["Mutations (writes)"]
+        A["Actions (external APIs)"]
+        DB2["Document Database<br\>indexes · search"]
+        Sched["Scheduler / Crons<br\>entropy · notifications"]
+        FS["File Storage<br\>images · exports"]
+        Q2 --> DB2
+        M2 --> DB2
+    end
+
+    Clerk["Clerk<br\>Authentication · sessions · user management"]
+
+    TS <-->|"useQuery / useMutation<br\>WebSocket"| Convex
+    Convex -->|"JWT verification"| Clerk
 ```
 
 ## What We Built (Module by Module)

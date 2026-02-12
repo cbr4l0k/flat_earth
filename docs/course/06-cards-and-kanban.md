@@ -227,15 +227,20 @@ export const remove = mutation({
 
 Each `useQuery` is an independent real-time subscription:
 
-```
-BoardPage
-├── useQuery(boards.get, { boardId })              → Board metadata
-├── useQuery(columns.listByBoard, { boardId })     → Column list
-├── useQuery(cards.listTriage, { boardId })         → Triage cards
-├── For each column:
-│   └── useQuery(cards.listByColumn, { columnId }) → Cards in column
-└── CardDetailPanel (when a card is selected)
-    └── useQuery(cards.get, { cardId })            → Card details
+```mermaid
+graph LR
+    BP["BoardPage"]
+    BM["boards.get<br\>Board metadata"]
+    CL["columns.listByBoard<br\>Column list"]
+    CT["cards.listTriage<br\>Triage cards"]
+    CC["cards.listByColumn<br\>Cards per column"]
+    CD["cards.get<br\>Card details"]
+
+    BP --> BM
+    BP --> CL
+    BP --> CT
+    BP --> CC
+    BP -->|when card selected| CD
 ```
 
 When a card moves from "To Do" to "In Progress":

@@ -309,36 +309,20 @@ No polling. No manual invalidation. No WebSocket channels. The query *is* the su
 
 ## Architecture Mental Model
 
-```
-┌─────────────────────────────────────┐
-│  Browser (React + TanStack Start)   │
-│                                     │
-│  useQuery(api.messages.list)  ────┐ │
-│  useMutation(api.messages.send) ┐ │ │
-│                                 │ │ │
-└─────────────────────────────────┼─┼─┘
-                                  │ │
-                           WebSocket connection
-                                  │ │
-┌─────────────────────────────────┼─┼─┘
-│  Convex Cloud                   │ │
-│                                 │ │
-│  ┌─ Queries ──────────────────┐ │ │
-│  │  Reactive: re-run when     │◄┘ │
-│  │  underlying data changes.  │   │
-│  │  Results pushed to client. │   │
-│  └────────────────────────────┘   │
-│                                   │
-│  ┌─ Mutations ────────────────┐   │
-│  │  Transactional: reads +    │◄──┘
-│  │  writes happen atomically. │
-│  │  Triggers query re-runs.   │
-│  └────────────────────────────┘
-│
-│  ┌─ Document Database ────────┐
-│  │  Indexed, typed, reactive  │
-│  └────────────────────────────┘
-└───────────────────────────────────┘
+```mermaid
+graph TD
+    Browser["Browser — React + TanStack Start"]
+
+    subgraph Convex["Convex Cloud"]
+        Q["Queries<br\>Reactive — re-run when data changes<br\>Results pushed to client"]
+        M["Mutations<br\>Transactional reads + writes<br\>Triggers query re-runs"]
+        DB["Document Database<br\>Indexed · typed · reactive"]
+    end
+
+    Browser -->|"useQuery (WebSocket)"| Q
+    Browser -->|"useMutation (WebSocket)"| M
+    Q --> DB
+    M --> DB
 ```
 
 ## Database Operations Reference

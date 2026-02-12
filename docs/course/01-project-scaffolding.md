@@ -7,7 +7,7 @@
 TanStack Start is a Vite-based React meta-framework with file-based, type-safe routing. It replaces Fizzy's Rails + Turbo + Stimulus stack with something more familiar to modern frontend devs.
 
 ```bash
-npm create @tanstack/start@latest
+bun create @tanstack/start@latest
 ```
 
 The CLI will prompt you for:
@@ -32,18 +32,16 @@ flat-earth/
 └── tsconfig.json
 ```
 
-> **Note:** If you prefer bun, you can run `bunx @tanstack/cli create flat-earth` instead. The rest of the course uses `npm` commands, but `bun` equivalents work interchangeably.
-
 ### Install Dependencies
 
 ```bash
-npm install
+bun install
 ```
 
 ### Verify It Runs
 
 ```bash
-npm run dev
+bun dev
 ```
 
 Open `http://localhost:3000`. You should see the default TanStack Start welcome page. Stop the server (`Ctrl+C`) before continuing.
@@ -53,7 +51,7 @@ Open `http://localhost:3000`. You should see the default TanStack Start welcome 
 If you didn't select Tailwind during the CLI scaffold, add it manually:
 
 ```bash
-npm install -D tailwindcss @tailwindcss/vite
+bun add -d tailwindcss @tailwindcss/vite
 ```
 
 Add the Tailwind Vite plugin to your config:
@@ -176,7 +174,7 @@ function HomePage() {
 }
 ```
 
-Run `npm run dev`. You should see a centered card with a title, description, and a button — all styled with Tailwind and shadcn/ui.
+Run `bun dev`. You should see a centered card with a title, description, and a button — all styled with Tailwind and shadcn/ui.
 
 ## Understanding File-Based Routing
 
@@ -246,11 +244,11 @@ flat-earth/
 
 ## Exercise
 
-1. Scaffold a TanStack Start project with `npm create @tanstack/start@latest`
+1. Scaffold a TanStack Start project with `bun create @tanstack/start@latest`
 2. Install Tailwind CSS and verify utility classes work
 3. Install shadcn/ui and add the `button` and `card` components
 4. Build a landing page using those components
-5. Verify `npm run dev` shows your styled page at `http://localhost:3000`
+5. Verify `bun dev` shows your styled page at `http://localhost:3000`
 6. Create one dynamic route (`/$accountId`) and verify the param works
 
 **Result:** A running, styled app in your browser. No backend yet — that's next.
