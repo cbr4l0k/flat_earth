@@ -89,7 +89,7 @@ export default defineSchema({
         .index("by_card", ["cardId"])
         .index("by_account", ["accountId"]),
 
-    assignmets: defineTable({
+    assignments: defineTable({
         accountId: v.id("accounts"),
         cardId: v.id("cards"),
         assigneeId: v.id("users"),
@@ -139,6 +139,7 @@ export default defineSchema({
         userId: v.id("users"),
     })
         .index("by_user", ["userId"])
+        .index("by_card", ["cardId"])
         .index("by_card_user", ["cardId", "userId"]),
 
     mentions: defineTable({
