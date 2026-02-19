@@ -2,6 +2,11 @@ import { ConvexError, v } from 'convex/values'
 import { mutation, query } from './_generated/server'
 import { MAX_COLUMNS_BY_BOARD } from './constants'
 import { requireAccountAccess } from './lib/auth'
+import {
+  isProtectedColumn,
+  isReservedProtectedColumnName,
+  normalizeColumnName,
+} from './lib/protectedColumns'
 import { canAdministerBoard, requireBoardAccess } from './lib/permissions'
 
 export const listByBoard = query({
@@ -27,9 +32,16 @@ export const create = mutation({
   handler: async (ctx, { accountId, boardId, name, color }) => {
     const user = await requireAccountAccess(ctx, accountId)
     const board = await requireBoardAccess(ctx, user, boardId)
+    const normalizedName = normalizeColumnName(name)
 
     if (!canAdministerBoard(user, board)) {
       throw new ConvexError('Not authorized')
+    }
+    if (!normalizedName) {
+      throw new ConvexError('Column name is required')
+    }
+    if (isReservedProtectedColumnName(normalizedName)) {
+      throw new ConvexError('Column name is reserved')
     }
 
     const columns = await ctx.db
@@ -41,12 +53,14 @@ export const create = mutation({
       throw new ConvexError(`Cannot create more than ${MAX_COLUMNS_BY_BOARD} columns`)
     }
 
-    const position = columns.length === 0 ? 0 : Math.max(...columns.map((c) => c.position)) + 1
+    const customColumns = columns.filter((column) => !isProtectedColumn(column))
+    const position =
+      customColumns.length === 0 ? 0 : Math.max(...customColumns.map((column) => column.position)) + 1
 
     return ctx.db.insert('columns', {
       accountId,
       boardId,
-      name: name.trim(),
+      name: normalizedName,
       color,
       position,
       protected: false,
@@ -70,12 +84,8 @@ export const reorder = mutation({
 
     const columns = await ctx.db
       .query('columns')
-      .withIndex('by_board', (q) => q.eq('boardId', boardId))
+      .withIndex('by_board_position', (q) => q.eq('boardId', boardId))
       .collect()
-
-    if (columns.length !== columnIdsInOrder.length) {
-      throw new ConvexError('Invalid columns payload')
-    }
 
     const knownIds = new Set(columns.map((c) => c._id))
     for (const id of columnIdsInOrder) {
@@ -84,8 +94,30 @@ export const reorder = mutation({
       }
     }
 
+    const protectedColumns = columns.filter((column) => isProtectedColumn(column))
+    const customColumns = columns.filter((column) => !isProtectedColumn(column))
+
+    if (columnIdsInOrder.length !== customColumns.length) {
+      throw new ConvexError('Reorder payload must include only custom columns')
+    }
+
+    for (const id of columnIdsInOrder) {
+      const column = columns.find((candidate) => candidate._id === id)
+      if (!column || isProtectedColumn(column)) {
+        throw new ConvexError('Protected columns cannot be reordered')
+      }
+    }
+
     for (const [index, columnId] of columnIdsInOrder.entries()) {
       await ctx.db.patch("columns", columnId, { position: index })
+    }
+
+    const anchored = [...protectedColumns].sort((a, b) => a.position - b.position)
+    for (const [index, column] of anchored.entries()) {
+      const anchorPosition = 900 + index * 100
+      if (column.position !== anchorPosition) {
+        await ctx.db.patch("columns", column._id, { position: anchorPosition })
+      }
     }
   },
 })
@@ -108,6 +140,9 @@ export const remove = mutation({
     if (!column || column.boardId !== boardId || column.accountId !== accountId) {
       throw new ConvexError('Column not found')
     }
+    if (isProtectedColumn(column)) {
+      throw new ConvexError(`Cannot remove protected column "${column.name}"`)
+    }
 
     const cards = await ctx.db
       .query('cards')
@@ -125,9 +160,20 @@ export const remove = mutation({
       .withIndex('by_board_position', (q) => q.eq('boardId', boardId))
       .collect()
 
-    for (const [index, col] of remaining.entries()) {
-      if (col.position !== index) {
-        await ctx.db.patch("columns", col._id, { position: index })
+    const customColumns = remaining.filter((candidate) => !isProtectedColumn(candidate))
+    for (const [index, customColumn] of customColumns.entries()) {
+      if (customColumn.position !== index) {
+        await ctx.db.patch("columns", customColumn._id, { position: index })
+      }
+    }
+
+    const protectedColumns = remaining
+      .filter((candidate) => isProtectedColumn(candidate))
+      .sort((a, b) => a.position - b.position)
+    for (const [index, protectedColumn] of protectedColumns.entries()) {
+      const anchorPosition = 900 + index * 100
+      if (protectedColumn.position !== anchorPosition) {
+        await ctx.db.patch("columns", protectedColumn._id, { position: anchorPosition })
       }
     }
   },

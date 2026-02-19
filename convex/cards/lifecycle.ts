@@ -1,6 +1,7 @@
 import { ConvexError, v } from 'convex/values'
 import { mutation } from '../_generated/server'
 import { requireAccountAccess } from '../lib/auth'
+import { isProtectedColumn } from '../lib/protectedColumns'
 
 export const publish = mutation({
   args: { accountId: v.id('accounts'), cardId: v.id('cards') },
@@ -188,6 +189,9 @@ export const triageInto = mutation({
     const column = await ctx.db.get("columns", columnId)
     if (!column || column.boardId !== card.boardId || column.accountId !== accountId) {
       throw new ConvexError('Column not on this board')
+    }
+    if (isProtectedColumn(column)) {
+      throw new ConvexError(`Cannot triage directly into protected column "${column.name}"`)
     }
 
     await ctx.db.patch("cards", cardId, {

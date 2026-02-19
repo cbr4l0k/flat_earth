@@ -67,9 +67,10 @@ export const create = mutation({
     })
 
     const defaultColumns = [
-      { name: 'To Do', color: '#6366f1', position: 0, protected: false },
-      { name: 'In Progress', color: '#f59e0b', position: 1, protected: false },
-      { name: 'Done', color: '#22c55e', position: 2, protected: false },
+      { name: 'Next', color: '#2563eb', position: 0, protected: false },
+      { name: 'In Progress', color: '#d97706', position: 1, protected: false },
+      { name: 'Not Now', color: '#334155', position: 900, protected: true },
+      { name: 'Done', color: '#15803d', position: 1000, protected: true },
     ]
 
     for (const col of defaultColumns) {
