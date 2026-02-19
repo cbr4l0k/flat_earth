@@ -25,8 +25,9 @@ function NotificationsRouteComponent() {
     return (
       <section className="simple-page">
         <header className="page-header">
+          <p className="page-eyebrow">Inbox Feed</p>
           <h1>Notifications</h1>
-          <p>Loading account notifications…</p>
+          <p className="page-dek">Loading account notifications…</p>
         </header>
       </section>
     )
@@ -35,11 +36,12 @@ function NotificationsRouteComponent() {
   return (
     <section className="simple-page">
       <header className="page-header">
+        <p className="page-eyebrow">Inbox Feed</p>
         <h1>Notifications</h1>
-        <p>{unreadCount} unread in this account.</p>
+        <p className="page-dek">{unreadCount} unread in this account.</p>
       </header>
 
-      <div className="onboard-actions">
+      <div className="notification-toolbar onboard-actions">
         <button type="button" onClick={() => markAllRead({ accountId })}>
           Mark all read
         </button>
@@ -57,7 +59,11 @@ function NotificationsRouteComponent() {
             <article key={notification._id} className="notification-row">
               <h2>{notification.source.type}</h2>
               <p>Source #{notification.source.id}</p>
-              <span>{notification.readAt ? 'Read' : 'Unread'}</span>
+              <span
+                className={`notification-status ${notification.readAt ? '' : 'status-unread'}`}
+              >
+                {notification.readAt ? 'Read' : 'Unread'}
+              </span>
               {!notification.readAt ? (
                 <button
                   type="button"
