@@ -1,7 +1,12 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from 'convex/react'
 import { api } from 'convex/_generated/api'
+import {
+  draggable,
+  dropTargetForElements,
+  monitorForElements,
+} from '@atlaskit/pragmatic-drag-and-drop/element/adapter'
 import type { Doc, Id } from 'convex/_generated/dataModel'
 import { useActiveAccount } from '~/utils/useActiveAccount'
 
@@ -15,7 +20,6 @@ export const Route = createFileRoute('/_authed/boards')({
 function BoardsRouteComponent() {
   const { activeAccount } = useActiveAccount()
   const [selectedBoardId, setSelectedBoardId] = useState<Id<'boards'> | null>(null)
-  const [draggingCardId, setDraggingCardId] = useState<Id<'cards'> | null>(null)
   const [mutationError, setMutationError] = useState<string | null>(null)
 
   const accountId = activeAccount?._id
@@ -134,10 +138,10 @@ function BoardsRouteComponent() {
     )
   }
 
-  async function dropIntoLane(targetLaneId: LaneId) {
-    if (!draggingCardId || !boardId || !accountId) return
+  async function dropCardIntoLane(cardId: Id<'cards'>, targetLaneId: LaneId) {
+    if (!boardId || !accountId) return
 
-    const card = cardLookup.get(draggingCardId)
+    const card = cardLookup.get(cardId)
     if (!card) return
 
     setMutationError(null)
@@ -161,10 +165,58 @@ function BoardsRouteComponent() {
       }
     } catch (error) {
       setMutationError(error instanceof Error ? error.message : 'Card move failed')
-    } finally {
-      setDraggingCardId(null)
     }
   }
+
+  useEffect(() => {
+    if (!accountId || !boardId) return
+
+    const cleanupFns: Array<() => void> = []
+    const cardElements = document.querySelectorAll<HTMLElement>('[data-card-id]')
+    const laneElements = document.querySelectorAll<HTMLElement>('[data-lane-id]')
+
+    for (const element of cardElements) {
+      const cardId = element.dataset.cardId as Id<'cards'> | undefined
+      if (!cardId) continue
+
+      cleanupFns.push(
+        draggable({
+          element,
+          getInitialData: () => ({ type: 'card', cardId }),
+        }),
+      )
+    }
+
+    for (const element of laneElements) {
+      const laneId = element.dataset.laneId
+      if (!laneId) continue
+
+      cleanupFns.push(
+        dropTargetForElements({
+          element,
+          getData: () => ({ laneId }),
+        }),
+      )
+    }
+
+    cleanupFns.push(
+      monitorForElements({
+        onDrop: ({ source, location }) => {
+          const cardId = source.data.cardId as Id<'cards'> | undefined
+          const laneId = location.current.dropTargets[0]?.data.laneId as
+            | LaneId
+            | undefined
+
+          if (!cardId || !laneId) return
+          void dropCardIntoLane(cardId, laneId)
+        },
+      }),
+    )
+
+    return () => {
+      cleanupFns.forEach((cleanup) => cleanup())
+    }
+  }, [accountId, boardId, laneMap, cardLookup])
 
   return (
     <section className="board-page">
@@ -199,9 +251,8 @@ function BoardsRouteComponent() {
         {laneMap.map((lane) => (
           <section
             key={lane.id}
+            data-lane-id={lane.id}
             className={`lane ${lane.isProtected ? 'lane-protected' : ''}`}
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={() => dropIntoLane(lane.id)}
           >
             <header className="lane-header">
               <h2>{lane.title}</h2>
@@ -213,10 +264,8 @@ function BoardsRouteComponent() {
               {cardsByLane[lane.id].map((card) => (
                 <article
                   key={card._id}
+                  data-card-id={card._id}
                   className="lane-card"
-                  draggable
-                  onDragStart={() => setDraggingCardId(card._id)}
-                  onDragEnd={() => setDraggingCardId(null)}
                 >
                   <h3>{card.title || `Card #${card.number}`}</h3>
                   <p>#{card.number}</p>
