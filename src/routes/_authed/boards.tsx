@@ -7,6 +7,7 @@ import {
   dropTargetForElements,
   monitorForElements,
 } from '@atlaskit/pragmatic-drag-and-drop/element/adapter'
+import type { CSSProperties } from 'react'
 import type { Doc, Id } from 'convex/_generated/dataModel'
 import { useActiveAccount } from '~/utils/useActiveAccount'
 
@@ -17,6 +18,7 @@ type Lane = {
   title: string
   kind: 'protected-not-now' | 'virtual-maybe' | 'custom-column' | 'protected-done'
   columnId?: Id<'columns'>
+  color?: string
 }
 
 type CardDoc = Doc<'cards'>
@@ -32,15 +34,20 @@ function BoardsRouteComponent() {
   const { activeAccount, activeBoards, accounts, setActiveAccountId } = useActiveAccount()
   const [selectedBoardId, setSelectedBoardId] = useState<Id<'boards'> | null>(null)
   const [mutationError, setMutationError] = useState<string | null>(null)
-  const [expandedCustomLaneId, setExpandedCustomLaneId] = useState<LaneId | null>(null)
+  const [expandedColumnLaneId, setExpandedColumnLaneId] = useState<LaneId | null>(null)
   const [isCreatingCard, setIsCreatingCard] = useState(false)
   const [pendingNavigateCardId, setPendingNavigateCardId] = useState<Id<'cards'> | null>(null)
   const [filterQuery, setFilterQuery] = useState('')
   const [isConfigOpen, setIsConfigOpen] = useState(false)
+  const [isAddColumnOpen, setIsAddColumnOpen] = useState(false)
+  const [newColumnName, setNewColumnName] = useState('')
+  const [newColumnColor, setNewColumnColor] = useState('#c4492b')
+  const [columnCreateError, setColumnCreateError] = useState<string | null>(null)
+  const [isCreatingColumn, setIsCreatingColumn] = useState(false)
   const [configTab, setConfigTab] = useState<ConfigTab>('account')
 
   const configPanelRef = useRef<HTMLDivElement | null>(null)
-  const configButtonRef = useRef<HTMLButtonElement | null>(null)
+  const addColumnTriggerRef = useRef<HTMLButtonElement | null>(null)
 
   const accountId = activeAccount?._id
   const boards = useMemo(
@@ -76,6 +83,7 @@ function BoardsRouteComponent() {
 
   const moveToColumn = useMutation(api.cards.moveToColumn)
   const createCard = useMutation(api.cards.create)
+  const createColumn = useMutation(api.columns.create)
   const markRead = useMutation(api.notifications.markRead)
   const markAllRead = useMutation(api.notifications.markAllRead)
 
@@ -106,6 +114,7 @@ function BoardsRouteComponent() {
         title: column.name,
         kind: 'custom-column' as const,
         columnId: column._id,
+        color: column.color,
       })),
       {
         id: 'done',
@@ -116,8 +125,8 @@ function BoardsRouteComponent() {
     ]
   }, [columns])
 
-  const customLaneIds = useMemo(
-    () => laneMap.filter((lane) => lane.kind === 'custom-column').map((lane) => lane.id),
+  const columnLaneIds = useMemo(
+    () => laneMap.filter((lane) => lane.kind !== 'virtual-maybe').map((lane) => lane.id),
     [laneMap],
   )
 
@@ -178,6 +187,8 @@ function BoardsRouteComponent() {
   const laneMapRef = useRef(laneMap)
   const cardElementsRef = useRef(new Map<string, HTMLElement>())
   const laneElementsRef = useRef(new Map<string, HTMLElement>())
+  const isDraggingCardRef = useRef(false)
+  const suppressLaneToggleRef = useRef(false)
 
   useEffect(() => {
     cardLookupRef.current = cardLookup
@@ -188,18 +199,18 @@ function BoardsRouteComponent() {
   }, [laneMap])
 
   useEffect(() => {
-    if (customLaneIds.length === 0) {
-      setExpandedCustomLaneId(null)
+    if (columnLaneIds.length === 0) {
+      setExpandedColumnLaneId(null)
       return
     }
 
-    setExpandedCustomLaneId((current) => {
-      if (current && customLaneIds.includes(current)) {
+    setExpandedColumnLaneId((current) => {
+      if (current && columnLaneIds.includes(current)) {
         return current
       }
-      return customLaneIds[0]
+      return null
     })
-  }, [customLaneIds, boardId])
+  }, [columnLaneIds, boardId])
 
   useEffect(() => {
     if (!pendingNavigateCardId) return
@@ -219,7 +230,6 @@ function BoardsRouteComponent() {
     function onDocumentClick(event: MouseEvent) {
       const target = event.target as Node
       if (configPanelRef.current?.contains(target)) return
-      if (configButtonRef.current?.contains(target)) return
       setIsConfigOpen(false)
     }
 
@@ -237,6 +247,29 @@ function BoardsRouteComponent() {
       document.removeEventListener('keydown', onEscape)
     }
   }, [isConfigOpen])
+
+  useEffect(() => {
+    const event = new CustomEvent('board-config-state', {
+      detail: { open: isConfigOpen },
+    })
+    window.dispatchEvent(event)
+  }, [isConfigOpen])
+
+  useEffect(() => {
+    function onToggleFromTopbar(event: Event) {
+      const customEvent = event as CustomEvent<{ open?: boolean }>
+      if (typeof customEvent.detail.open === 'boolean') {
+        setIsConfigOpen(customEvent.detail.open)
+        return
+      }
+      setIsConfigOpen((open) => !open)
+    }
+
+    window.addEventListener('board-config-toggle', onToggleFromTopbar as EventListener)
+    return () => {
+      window.removeEventListener('board-config-toggle', onToggleFromTopbar as EventListener)
+    }
+  }, [])
 
   const getCardLaneId = useCallback(
     (card: CardDoc): LaneId => {
@@ -305,6 +338,41 @@ function BoardsRouteComponent() {
     }
   }, [accountId, boardId, createCard])
 
+  const closeAddColumnComposer = useCallback(() => {
+    setColumnCreateError(null)
+    setIsAddColumnOpen(false)
+    addColumnTriggerRef.current?.focus()
+  }, [])
+
+  const createCustomColumn = useCallback(async () => {
+    if (!accountId || !boardId) return
+
+    const normalizedName = newColumnName.trim()
+    if (!normalizedName) {
+      setColumnCreateError('Column name is required')
+      return
+    }
+
+    setIsCreatingColumn(true)
+    setColumnCreateError(null)
+
+    try {
+      await createColumn({
+        accountId,
+        boardId,
+        name: normalizedName,
+        color: newColumnColor,
+      })
+      setNewColumnName('')
+      setNewColumnColor('#c4492b')
+      closeAddColumnComposer()
+    } catch (error) {
+      setColumnCreateError(error instanceof Error ? error.message : 'Failed to create column')
+    } finally {
+      setIsCreatingColumn(false)
+    }
+  }, [accountId, boardId, closeAddColumnComposer, createColumn, newColumnColor, newColumnName])
+
   const setCardElement = useCallback((cardId: string, node: HTMLElement | null) => {
     if (node) {
       cardElementsRef.current.set(cardId, node)
@@ -321,8 +389,18 @@ function BoardsRouteComponent() {
     laneElementsRef.current.delete(laneId)
   }, [])
 
-  const cardIdsKey = useMemo(() => (allCards ?? []).map((card) => card._id).join('|'), [allCards])
+  const visibleCardIdsKey = useMemo(
+    () =>
+      laneMap
+        .map((lane) => (cardsByLane[lane.id] ?? []).map((card) => card._id).join(','))
+        .join('|'),
+    [cardsByLane, laneMap],
+  )
   const laneIdsKey = useMemo(() => laneMap.map((lane) => lane.id).join('|'), [laneMap])
+  const laneLayoutKey = useMemo(
+    () => `${expandedColumnLaneId ?? 'none'}|${isAddColumnOpen ? 'add-open' : 'add-closed'}`,
+    [expandedColumnLaneId, isAddColumnOpen],
+  )
 
   useEffect(() => {
     if (!accountId || !boardId) return
@@ -349,7 +427,13 @@ function BoardsRouteComponent() {
 
     cleanupFns.push(
       monitorForElements({
+        onDragStart: ({ source }) => {
+          if (source.data.type === 'card') {
+            isDraggingCardRef.current = true
+          }
+        },
         onDrop: ({ source, location }) => {
+          isDraggingCardRef.current = false
           const cardId = source.data.cardId as Id<'cards'> | undefined
           if (!cardId) return
 
@@ -360,6 +444,11 @@ function BoardsRouteComponent() {
           const laneId = dropTarget?.data.laneId as LaneId | undefined
           if (!laneId) return
 
+          suppressLaneToggleRef.current = true
+          window.setTimeout(() => {
+            suppressLaneToggleRef.current = false
+          }, 0)
+
           void dropCardIntoLane(cardId, laneId)
         },
       }),
@@ -368,17 +457,17 @@ function BoardsRouteComponent() {
     return () => {
       cleanupFns.forEach((cleanup) => cleanup())
     }
-  }, [accountId, boardId, cardIdsKey, laneIdsKey, dropCardIntoLane])
+  }, [accountId, boardId, visibleCardIdsKey, laneIdsKey, laneLayoutKey, dropCardIntoLane])
 
   const openConfigTab = useCallback((tab: ConfigTab) => {
     setConfigTab(tab)
     setIsConfigOpen(true)
   }, [])
 
-  const onToggleCustomLane = useCallback((laneId: LaneId) => {
-    if (!customLaneIds.includes(laneId)) return
-    setExpandedCustomLaneId(laneId)
-  }, [customLaneIds])
+  const onToggleColumnLane = useCallback((laneId: LaneId) => {
+    if (!columnLaneIds.includes(laneId)) return
+    setExpandedColumnLaneId((current) => (current === laneId ? null : laneId))
+  }, [columnLaneIds])
 
   const boardName = boards.find((board) => board._id === boardId)?.name ?? 'Board'
 
@@ -418,8 +507,8 @@ function BoardsRouteComponent() {
   return (
     <section className="board-page">
       <header className="board-topbar">
-        <h1>{boardName}</h1>
-        <div className="board-topbar-controls">
+        <h1 className="board-topbar-title">{boardName}</h1>
+        <div className="board-topbar-search">
           <input
             type="search"
             className="board-filter"
@@ -428,16 +517,6 @@ function BoardsRouteComponent() {
             placeholder="Filter cards..."
             aria-label="Filter cards"
           />
-          <button
-            ref={configButtonRef}
-            type="button"
-            className="config-button"
-            onClick={() => setIsConfigOpen((open) => !open)}
-            aria-label="Open configuration panel"
-            aria-expanded={isConfigOpen}
-          >
-            <span aria-hidden>⚙</span>
-          </button>
         </div>
       </header>
 
@@ -446,9 +525,7 @@ function BoardsRouteComponent() {
       <div className="board-main">
         <div className="lane-grid">
           {laneMap.map((lane) => {
-            const isCustom = lane.kind === 'custom-column'
-            const isExpanded =
-              lane.kind === 'virtual-maybe' || (isCustom && lane.id === expandedCustomLaneId)
+            const isExpanded = lane.kind === 'virtual-maybe' || lane.id === expandedColumnLaneId
             const isRail = !isExpanded
             const laneCards = cardsByLane[lane.id] ?? []
 
@@ -462,7 +539,28 @@ function BoardsRouteComponent() {
                   isExpanded ? 'lane-expanded' : 'lane-collapsed',
                   lane.kind.startsWith('protected-') ? 'lane-protected' : '',
                   lane.kind === 'virtual-maybe' ? 'lane-maybe' : '',
+                  lane.kind === 'custom-column' ? 'lane-custom' : '',
                 ].join(' ')}
+                style={
+                  lane.kind === 'custom-column' && lane.color
+                    ? ({ '--lane-accent': lane.color } as CSSProperties)
+                    : undefined
+                }
+                onClick={(event) => {
+                  if (lane.kind === 'virtual-maybe') return
+                  if (isDraggingCardRef.current || suppressLaneToggleRef.current) return
+
+                  const target = event.target as HTMLElement
+                  if (
+                    target.closest(
+                      'button, input, select, textarea, a, [role="button"], .lane-card, .lane-add-card',
+                    )
+                  ) {
+                    return
+                  }
+
+                  onToggleColumnLane(lane.id)
+                }}
               >
                 {isRail ? (
                   <button
@@ -471,11 +569,11 @@ function BoardsRouteComponent() {
                     onPointerDown={(event) => {
                       event.stopPropagation()
                     }}
-                    onClick={() => {
-                      if (!isCustom) return
-                      onToggleCustomLane(lane.id)
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onToggleColumnLane(lane.id)
                     }}
-                    disabled={!isCustom}
+                    disabled={lane.kind === 'virtual-maybe'}
                   >
                     <span className="lane-collapsed-count">{laneCards.length}</span>
                     <span className="lane-collapsed-title">{lane.title}</span>
@@ -484,6 +582,19 @@ function BoardsRouteComponent() {
                   <>
                     <header className="lane-header">
                       <h2>{lane.title}</h2>
+                      {lane.kind !== 'virtual-maybe' ? (
+                        <button
+                          type="button"
+                          className="lane-collapse"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onToggleColumnLane(lane.id)
+                          }}
+                          aria-label={`Collapse ${lane.title}`}
+                        >
+                          Collapse
+                        </button>
+                      ) : null}
                       <span>{laneCards.length}</span>
                       {lane.kind === 'virtual-maybe' ? (
                         <button
@@ -527,6 +638,80 @@ function BoardsRouteComponent() {
               </section>
             )
           })}
+          <section
+            className={isAddColumnOpen ? 'lane-add-column lane-add-column-open' : 'lane-add-column'}
+            aria-label="Add column"
+          >
+            {!isAddColumnOpen ? (
+              <button
+                type="button"
+                ref={addColumnTriggerRef}
+                className="lane-add-column-trigger"
+                onClick={() => {
+                  setColumnCreateError(null)
+                  setIsAddColumnOpen(true)
+                }}
+                aria-label="Add column"
+              >
+                +
+              </button>
+            ) : (
+              <form
+                className="lane-add-column-form"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void createCustomColumn()
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    closeAddColumnComposer()
+                  }
+                }}
+              >
+                <label htmlFor="new-column-name">Column name</label>
+                <input
+                  id="new-column-name"
+                  value={newColumnName}
+                  onChange={(event) => setNewColumnName(event.target.value)}
+                  placeholder="For example: Waiting"
+                  disabled={isCreatingColumn}
+                  aria-describedby={columnCreateError ? 'new-column-error' : undefined}
+                  required
+                  autoFocus
+                />
+
+                <label htmlFor="new-column-color">Color</label>
+                <input
+                  id="new-column-color"
+                  type="color"
+                  value={newColumnColor}
+                  onChange={(event) => setNewColumnColor(event.target.value)}
+                  disabled={isCreatingColumn}
+                />
+
+                {columnCreateError ? (
+                  <p id="new-column-error" className="field-error" role="status" aria-live="polite">
+                    {columnCreateError}
+                  </p>
+                ) : null}
+
+                <div className="lane-add-column-actions">
+                  <button type="submit" disabled={isCreatingColumn}>
+                    {isCreatingColumn ? 'Creating…' : 'Create'}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={isCreatingColumn}
+                    onClick={closeAddColumnComposer}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+          </section>
         </div>
 
         {isConfigOpen ? (

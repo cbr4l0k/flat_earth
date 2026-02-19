@@ -1,6 +1,6 @@
-import { Outlet, createFileRoute, redirect } from '@tanstack/react-router'
+import { Outlet, createFileRoute, redirect, useLocation } from '@tanstack/react-router'
 import { SignedIn, UserButton } from '@clerk/tanstack-react-start'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from 'convex/react'
 import { api } from 'convex/_generated/api'
 import {
@@ -18,6 +18,7 @@ export const Route = createFileRoute('/_authed')({
 })
 
 function AuthedLayout() {
+  const location = useLocation()
   const accounts = useQuery(api.accounts.listMyAccounts, {})
   const activeAccountState = useManagedActiveAccount(accounts)
   const { activeAccount } = activeAccountState
@@ -32,6 +33,27 @@ function AuthedLayout() {
   const [installerSecret, setInstallerSecret] = useState('')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isPending, setIsPending] = useState(false)
+  const [isBoardConfigOpen, setIsBoardConfigOpen] = useState(false)
+
+  const isBoardsRoute = location.pathname === '/boards'
+
+  useEffect(() => {
+    function onBoardConfigState(event: Event) {
+      const customEvent = event as CustomEvent<{ open: boolean }>
+      setIsBoardConfigOpen(customEvent.detail.open)
+    }
+
+    window.addEventListener('board-config-state', onBoardConfigState as EventListener)
+    return () => {
+      window.removeEventListener('board-config-state', onBoardConfigState as EventListener)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isBoardsRoute) {
+      setIsBoardConfigOpen(false)
+    }
+  }, [isBoardsRoute])
 
   const isLoading = useMemo(
     () => accounts === undefined || canBootstrap === undefined,
@@ -148,8 +170,27 @@ function AuthedLayout() {
             <p className="authed-active-account">{activeAccount?.name ?? 'Workspace'}</p>
           </div>
           <SignedIn>
-            <div className="authed-user">
-              <UserButton />
+            <div className="authed-topbar-actions">
+              {isBoardsRoute ? (
+                <button
+                  type="button"
+                  className="authed-config-button"
+                  aria-label="Toggle board configuration"
+                  aria-expanded={isBoardConfigOpen}
+                  onClick={() => {
+                    window.dispatchEvent(
+                      new CustomEvent('board-config-toggle', {
+                        detail: { open: !isBoardConfigOpen },
+                      }),
+                    )
+                  }}
+                >
+                  Config
+                </button>
+              ) : null}
+              <div className="authed-user">
+                <UserButton />
+              </div>
             </div>
           </SignedIn>
         </header>
