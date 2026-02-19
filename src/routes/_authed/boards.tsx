@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from 'convex/react'
 import { api } from 'convex/_generated/api'
@@ -11,6 +11,14 @@ import type { Doc, Id } from 'convex/_generated/dataModel'
 import { useActiveAccount } from '~/utils/useActiveAccount'
 
 type LaneId = string
+
+type Lane = {
+  id: LaneId
+  title: string
+  kind: 'protected-not-now' | 'virtual-maybe' | 'custom-column' | 'protected-done'
+  columnId?: Id<'columns'>
+}
+
 type CardDoc = Doc<'cards'>
 
 export const Route = createFileRoute('/_authed/boards')({
@@ -18,15 +26,13 @@ export const Route = createFileRoute('/_authed/boards')({
 })
 
 function BoardsRouteComponent() {
+  const navigate = useNavigate()
   const { activeAccount, activeBoards } = useActiveAccount()
   const [selectedBoardId, setSelectedBoardId] = useState<Id<'boards'> | null>(null)
   const [mutationError, setMutationError] = useState<string | null>(null)
   const [expandedCustomLaneId, setExpandedCustomLaneId] = useState<LaneId | null>(null)
   const [isCreatingCard, setIsCreatingCard] = useState(false)
-  const [selectedCardId, setSelectedCardId] = useState<Id<'cards'> | null>(null)
-  const [cardTitleDraft, setCardTitleDraft] = useState('')
-  const [cardDescriptionDraft, setCardDescriptionDraft] = useState('')
-  const [isSavingCard, setIsSavingCard] = useState(false)
+  const [pendingNavigateCardId, setPendingNavigateCardId] = useState<Id<'cards'> | null>(null)
 
   const accountId = activeAccount?._id
   const boards = useMemo(
@@ -46,101 +52,93 @@ function BoardsRouteComponent() {
 
   const moveToColumn = useMutation(api.cards.moveToColumn)
   const createCard = useMutation(api.cards.create)
-  const updateCard = useMutation(api.cards.update)
 
-  const laneMap = useMemo(() => {
+  const laneMap = useMemo<Array<Lane>>(() => {
     if (!columns) return []
 
-    const customColumns = columns
-      .filter((column) => !column.protected)
-      .sort((a, b) => a.position - b.position)
-    const notNow = columns.find((column) => column.name.toLowerCase() === 'not now')
-    const done = columns.find((column) => column.name.toLowerCase() === 'done')
+    const sorted = [...columns].sort((a, b) => a.position - b.position)
+    const notNow = sorted.find((column) => column.name.toLowerCase() === 'not now')
+    const done = sorted.find((column) => column.name.toLowerCase() === 'done')
+    const customColumns = sorted.filter(
+      (column) => !column.protected && column._id !== notNow?._id && column._id !== done?._id,
+    )
 
-    const lanes: Array<{
-      id: LaneId
-      title: string
-      subtitle: string
-      isVirtual?: boolean
-      isProtected?: boolean
-      columnId?: string
-    }> = [
+    return [
+      {
+        id: 'not-now',
+        title: 'Not Now',
+        kind: 'protected-not-now',
+        columnId: notNow?._id,
+      },
       {
         id: 'maybe',
         title: 'Maybe',
-        subtitle: 'Virtual triage lane (cards with no column)',
-        isVirtual: true,
+        kind: 'virtual-maybe',
       },
       ...customColumns.map((column) => ({
         id: `column:${column._id}`,
         title: column.name,
-        subtitle: 'Custom workflow column',
+        kind: 'custom-column' as const,
         columnId: column._id,
       })),
       {
-        id: 'not-now',
-        title: 'Not Now',
-        subtitle: 'Protected system lane',
-        isProtected: true,
-        columnId: notNow?._id,
-      },
-      {
         id: 'done',
         title: 'Done',
-        subtitle: 'Protected system lane',
-        isProtected: true,
+        kind: 'protected-done',
         columnId: done?._id,
       },
     ]
-
-    return lanes
   }, [columns])
 
   const customLaneIds = useMemo(
-    () => laneMap.filter((lane) => lane.id.startsWith('column:')).map((lane) => lane.id),
+    () => laneMap.filter((lane) => lane.kind === 'custom-column').map((lane) => lane.id),
     [laneMap],
   )
 
   const cardsByLane = useMemo(() => {
     const map: Record<string, Array<CardDoc>> = {}
-    laneMap.forEach((lane) => {
-      map[lane.id] = []
-    })
+    for (const lane of laneMap) map[lane.id] = []
 
     if (allCards) {
+      const notNowId = laneMap.find((lane) => lane.kind === 'protected-not-now')?.columnId
+      const doneId = laneMap.find((lane) => lane.kind === 'protected-done')?.columnId
+
       for (const card of allCards) {
         if (card.columnId === null) {
           map.maybe = [...map.maybe, card]
           continue
         }
-        const laneId = `column:${card.columnId}`
-        map[laneId] = [...(map[laneId] ?? []), card]
+
+        if (notNowId && card.columnId === notNowId) {
+          map['not-now'] = [...map['not-now'], card]
+          continue
+        }
+
+        if (doneId && card.columnId === doneId) {
+          map.done = [...map.done, card]
+          continue
+        }
+
+        const customLaneId = `column:${card.columnId}`
+        map[customLaneId] = [...(map[customLaneId] ?? []), card]
       }
     }
+
     return map
-  }, [laneMap, allCards])
+  }, [allCards, laneMap])
 
   const cardLookup = useMemo(() => {
-    const all = [...(allCards ?? [])]
     const lookup = new Map<Id<'cards'>, CardDoc>()
-    all.forEach((card) => {
+    for (const card of allCards ?? []) {
       lookup.set(card._id, card)
-    })
+    }
     return lookup
   }, [allCards])
 
-  const publishedCardIds = useMemo(() => {
-    if (!allCards) return ''
-    return allCards
-      .map((card) => card._id)
-      .join('|')
-  }, [allCards])
-
-  const laneIds = useMemo(() => laneMap.map((lane) => lane.id).join('|'), [laneMap])
-
   const cardLookupRef = useRef(cardLookup)
   const laneMapRef = useRef(laneMap)
-  const selectedCard = selectedCardId ? cardLookup.get(selectedCardId) ?? null : null
+  const cardElementsRef = useRef(new Map<string, HTMLElement>())
+  const laneElementsRef = useRef(new Map<string, HTMLElement>())
 
   useEffect(() => {
     cardLookupRef.current = cardLookup
@@ -149,16 +147,6 @@ function BoardsRouteComponent() {
   useEffect(() => {
     laneMapRef.current = laneMap
   }, [laneMap])
-
-  useEffect(() => {
-    if (!selectedCard) {
-      setCardTitleDraft('')
-      setCardDescriptionDraft('')
-      return
-    }
-    setCardTitleDraft(selectedCard.title)
-    setCardDescriptionDraft(selectedCard.description ?? '')
-  }, [selectedCard])
 
   useEffect(() => {
     if (customLaneIds.length === 0) {
@@ -170,45 +158,78 @@ function BoardsRouteComponent() {
     }
   }, [customLaneIds, expandedCustomLaneId, boardId])
 
-  const dropCardIntoLane = useCallback(async (cardId: Id<'cards'>, targetLaneId: LaneId) => {
-    if (!boardId || !accountId) return
+  useEffect(() => {
+    if (!pendingNavigateCardId) return
+    const created = cardLookup.get(pendingNavigateCardId)
+    if (!created) return
 
-    const card = cardLookupRef.current.get(cardId)
-    if (!card) return
+    setPendingNavigateCardId(null)
+    void navigate({
+      to: '/cards/$number',
+      params: { number: String(created.number) },
+    })
+  }, [cardLookup, navigate, pendingNavigateCardId])
 
-    setMutationError(null)
+  const getCardLaneId = useCallback(
+    (card: CardDoc): LaneId => {
+      if (card.columnId === null) return 'maybe'
 
-    try {
-      if (targetLaneId === 'maybe') {
-        await moveToColumn({ accountId, cardId: card._id, columnId: null })
-      } else if (targetLaneId === 'not-now' || targetLaneId === 'done') {
-        const protectedColumnId = laneMapRef.current.find(
-          (lane) => lane.id === targetLaneId,
-        )?.columnId
-        if (!protectedColumnId) {
-          throw new Error('Protected lane is not configured on this board')
+      const notNowId = laneMapRef.current.find((lane) => lane.kind === 'protected-not-now')?.columnId
+      const doneId = laneMapRef.current.find((lane) => lane.kind === 'protected-done')?.columnId
+
+      if (notNowId && card.columnId === notNowId) return 'not-now'
+      if (doneId && card.columnId === doneId) return 'done'
+      return `column:${card.columnId}`
+    },
+    [],
+  )
+
+  const dropCardIntoLane = useCallback(
+    async (cardId: Id<'cards'>, targetLaneId: LaneId) => {
+      if (!boardId || !accountId) return
+
+      const card = cardLookupRef.current.get(cardId)
+      if (!card) return
+
+      const currentLaneId = getCardLaneId(card)
+      if (currentLaneId === targetLaneId) return
+
+      setMutationError(null)
+
+      try {
+        if (targetLaneId === 'maybe') {
+          await moveToColumn({ accountId, cardId: card._id, columnId: null })
+          return
         }
+
+        const targetLane = laneMapRef.current.find((lane) => lane.id === targetLaneId)
+        if (!targetLane) return
+
+        if (!targetLane.columnId) {
+          throw new Error(`Lane "${targetLane.title}" is not configured`)
+        }
+
         await moveToColumn({
           accountId,
           cardId: card._id,
-          columnId: protectedColumnId as Id<'columns'>,
+          columnId: targetLane.columnId,
         })
-      } else if (targetLaneId.startsWith('column:')) {
-        const columnId = targetLaneId.replace('column:', '')
-        await moveToColumn({ accountId, cardId: card._id, columnId: columnId as Id<'columns'> })
+      } catch (error) {
+        setMutationError(error instanceof Error ? error.message : 'Card move failed')
       }
-    } catch (error) {
-      setMutationError(error instanceof Error ? error.message : 'Card move failed')
-    }
-  }, [accountId, boardId, moveToColumn])
+    },
+    [accountId, boardId, getCardLaneId, moveToColumn],
+  )
 
   const createCardInMaybe = useCallback(async () => {
     if (!accountId || !boardId) return
+
     setIsCreatingCard(true)
     setMutationError(null)
+
     try {
       const cardId = await createCard({ accountId, boardId, title: '' })
-      setSelectedCardId(cardId)
+      setPendingNavigateCardId(cardId)
     } catch (error) {
       setMutationError(error instanceof Error ? error.message : 'Failed to create card')
     } finally {
@@ -216,35 +237,31 @@ function BoardsRouteComponent() {
     }
   }, [accountId, boardId, createCard])
 
-  const saveSelectedCard = useCallback(async () => {
-    if (!accountId || !selectedCardId) return
-    setIsSavingCard(true)
-    setMutationError(null)
-    try {
-      await updateCard({
-        accountId,
-        cardId: selectedCardId,
-        title: cardTitleDraft,
-        description: cardDescriptionDraft,
-      })
-    } catch (error) {
-      setMutationError(error instanceof Error ? error.message : 'Failed to save card')
-    } finally {
-      setIsSavingCard(false)
+  const setCardElement = useCallback((cardId: string, node: HTMLElement | null) => {
+    if (node) {
+      cardElementsRef.current.set(cardId, node)
+      return
     }
-  }, [accountId, selectedCardId, updateCard, cardTitleDraft, cardDescriptionDraft])
+    cardElementsRef.current.delete(cardId)
+  }, [])
+
+  const setLaneElement = useCallback((laneId: string, node: HTMLElement | null) => {
+    if (node) {
+      laneElementsRef.current.set(laneId, node)
+      return
+    }
+    laneElementsRef.current.delete(laneId)
+  }, [])
+
+  const cardIdsKey = useMemo(() => (allCards ?? []).map((card) => card._id).join('|'), [allCards])
+  const laneIdsKey = useMemo(() => laneMap.map((lane) => lane.id).join('|'), [laneMap])
 
   useEffect(() => {
     if (!accountId || !boardId) return
 
     const cleanupFns: Array<() => void> = []
-    const cardElements = document.querySelectorAll<HTMLElement>('[data-card-id]')
-    const laneElements = document.querySelectorAll<HTMLElement>('[data-lane-id]')
 
-    for (const element of cardElements) {
-      const cardId = element.dataset.cardId as Id<'cards'> | undefined
-      if (!cardId) continue
-
+    for (const [cardId, element] of cardElementsRef.current.entries()) {
       cleanupFns.push(
         draggable({
           element,
@@ -253,10 +270,7 @@ function BoardsRouteComponent() {
       )
     }
 
-    for (const element of laneElements) {
-      const laneId = element.dataset.laneId
-      if (!laneId) continue
-
+    for (const [laneId, element] of laneElementsRef.current.entries()) {
       cleanupFns.push(
         dropTargetForElements({
           element,
@@ -269,11 +283,15 @@ function BoardsRouteComponent() {
       monitorForElements({
         onDrop: ({ source, location }) => {
           const cardId = source.data.cardId as Id<'cards'> | undefined
-          const laneId = location.current.dropTargets[0]?.data.laneId as
-            | LaneId
-            | undefined
+          if (!cardId) return
 
-          if (!cardId || !laneId) return
+          const dropTarget = location.current.dropTargets.find((target) => {
+            return typeof target.data.laneId === 'string'
+          })
+
+          const laneId = dropTarget?.data.laneId as LaneId | undefined
+          if (!laneId) return
+
           void dropCardIntoLane(cardId, laneId)
         },
       }),
@@ -282,7 +300,7 @@ function BoardsRouteComponent() {
     return () => {
       cleanupFns.forEach((cleanup) => cleanup())
     }
-  }, [accountId, boardId, laneIds, publishedCardIds, dropCardIntoLane])
+  }, [accountId, boardId, cardIdsKey, laneIdsKey, dropCardIntoLane])
 
   if (!activeAccount) {
     return (
@@ -308,13 +326,8 @@ function BoardsRouteComponent() {
 
   return (
     <section className="board-page">
-      <header className="page-header">
-        <p className="page-eyebrow">Boards</p>
-        <h1>Boards</h1>
-        <p>
-          One-click card creation goes to Maybe. Only one working column stays expanded;
-          Not Now and Done remain protected collapsed rails.
-        </p>
+      <header className="page-header board-header-simple">
+        <h1>{boards.find((board) => board._id === boardId)?.name ?? 'Board'}</h1>
       </header>
 
       <div className="board-toolbar">
@@ -336,24 +349,25 @@ function BoardsRouteComponent() {
 
       <div className="board-main">
         <div className="lane-grid">
-          {laneMap.map((lane) => (
-            (() => {
-            const isCustom = lane.id.startsWith('column:')
-            const isExpanded = lane.id === 'maybe' || (isCustom && lane.id === expandedCustomLaneId)
-            const isCollapsedRail = !isExpanded
+          {laneMap.map((lane) => {
+            const isCustom = lane.kind === 'custom-column'
+            const isExpanded =
+              lane.kind === 'virtual-maybe' || (isCustom && lane.id === expandedCustomLaneId)
+            const isRail = !isExpanded
 
             return (
               <section
                 key={lane.id}
+                ref={(node) => setLaneElement(lane.id, node)}
                 data-lane-id={lane.id}
                 className={[
                   'lane',
-                  lane.isProtected ? 'lane-protected' : '',
-                  lane.id === 'maybe' ? 'lane-maybe' : '',
                   isExpanded ? 'lane-expanded' : 'lane-collapsed',
+                  lane.kind.startsWith('protected-') ? 'lane-protected' : '',
+                  lane.kind === 'virtual-maybe' ? 'lane-maybe' : '',
                 ].join(' ')}
               >
-                {isCollapsedRail ? (
+                {isRail ? (
                   <button
                     type="button"
                     className="lane-collapsed-toggle"
@@ -370,9 +384,8 @@ function BoardsRouteComponent() {
                   <>
                     <header className="lane-header">
                       <h2>{lane.title}</h2>
-                      <p>{lane.subtitle}</p>
                       <span>{cardsByLane[lane.id].length}</span>
-                      {lane.id === 'maybe' ? (
+                      {lane.kind === 'virtual-maybe' ? (
                         <button
                           type="button"
                           className="lane-add-card"
@@ -385,66 +398,30 @@ function BoardsRouteComponent() {
                     </header>
 
                     <div className="lane-cards">
-                      {cardsByLane[lane.id].map((card) => (
+                      {(cardsByLane[lane.id] ?? []).map((card) => (
                         <article
                           key={card._id}
+                          ref={(node) => setCardElement(card._id, node)}
                           data-card-id={card._id}
                           className="lane-card"
-                          onClick={() => setSelectedCardId(card._id)}
+                          onClick={() =>
+                            void navigate({
+                              to: '/cards/$number',
+                              params: { number: String(card.number) },
+                            })
+                          }
                         >
                           <h3>{card.title || `Card #${card.number}`}</h3>
                           <p>#{card.number}</p>
                         </article>
                       ))}
                     </div>
-
-                    {lane.isVirtual ? (
-                      <p className="lane-note">Virtual triage lane.</p>
-                    ) : null}
                   </>
                 )}
               </section>
             )
-            })()
-          ))}
+          })}
         </div>
-
-        <aside className="card-editor">
-          <header className="card-editor-header">
-            <h2>Card Editor</h2>
-            <p>{selectedCard ? `#${selectedCard.number}` : 'Select a card to edit'}</p>
-          </header>
-
-          <label htmlFor="card-title">Title</label>
-          <input
-            id="card-title"
-            value={cardTitleDraft}
-            onChange={(event) => setCardTitleDraft(event.target.value)}
-            disabled={!selectedCard || isSavingCard}
-            placeholder="Card title"
-          />
-
-          <label htmlFor="card-description">Description</label>
-          <textarea
-            id="card-description"
-            value={cardDescriptionDraft}
-            onChange={(event) => setCardDescriptionDraft(event.target.value)}
-            disabled={!selectedCard || isSavingCard}
-            rows={8}
-            placeholder="Add details, decisions, and next actions"
-          />
-
-          <div className="card-editor-actions">
-            <button
-              type="button"
-              className="text-action"
-              onClick={() => void saveSelectedCard()}
-              disabled={!selectedCard || isSavingCard}
-            >
-              {isSavingCard ? 'Saving…' : 'Save card'}
-            </button>
-          </div>
-        </aside>
       </div>
     </section>
   )
