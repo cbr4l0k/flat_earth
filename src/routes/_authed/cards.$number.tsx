@@ -1,7 +1,8 @@
-import { Link, createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from 'convex/react'
 import { api } from 'convex/_generated/api'
+import type { CSSProperties, KeyboardEvent } from 'react'
 import { useActiveAccount } from '~/utils/useActiveAccount'
 
 export const Route = createFileRoute('/_authed/cards/$number')({
@@ -9,6 +10,7 @@ export const Route = createFileRoute('/_authed/cards/$number')({
 })
 
 function CardDetailRouteComponent() {
+  const navigate = useNavigate()
   const { number } = Route.useParams()
   const { activeAccount } = useActiveAccount()
   const accountId = activeAccount?._id
@@ -19,6 +21,10 @@ function CardDetailRouteComponent() {
     accountId && Number.isFinite(cardNumber)
       ? { accountId, number: cardNumber }
       : 'skip',
+  )
+  const columns = useQuery(
+    api.columns.listByBoard,
+    accountId && card ? { accountId, boardId: card.boardId } : 'skip',
   )
   const updateCard = useMutation(api.cards.update)
 
@@ -33,8 +39,15 @@ function CardDetailRouteComponent() {
     setDescription(card.description ?? '')
   }, [card])
 
-  async function onSave() {
-    if (!accountId || !card) return
+  const editorAccent = useMemo(() => {
+    if (!card) return '#c4492b'
+    if (card.columnId === null) return '#8a5d2f'
+    const column = columns?.find((candidate) => candidate._id === card.columnId)
+    return column?.color ?? '#c4492b'
+  }, [card, columns])
+
+  async function onSave(): Promise<boolean> {
+    if (!accountId || !card) return false
 
     setIsSaving(true)
     setError(null)
@@ -45,11 +58,19 @@ function CardDetailRouteComponent() {
         title,
         description,
       })
+      return true
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Failed to save card')
+      return false
     } finally {
       setIsSaving(false)
     }
+  }
+
+  async function onSaveAndBack() {
+    const didSave = await onSave()
+    if (!didSave) return
+    await navigate({ to: '/boards' })
   }
 
   if (!activeAccount) {
@@ -100,13 +121,25 @@ function CardDetailRouteComponent() {
   }
 
   return (
-    <section className="simple-page card-page">
+    <section
+      className="simple-page card-page"
+      style={{ '--card-column-accent': editorAccent } as CSSProperties}
+    >
       <header className="page-header">
         <p className="page-eyebrow">Card</p>
         <h1>#{card.number}</h1>
       </header>
 
-      <div className="card-editor card-editor-page">
+      <div
+        className="card-editor card-editor-page"
+        onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+          if (isSaving) return
+          if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+            event.preventDefault()
+            void onSaveAndBack()
+          }
+        }}
+      >
         <label htmlFor="card-title">Title</label>
         <input
           id="card-title"
