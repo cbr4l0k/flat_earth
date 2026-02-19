@@ -9,7 +9,7 @@ function Home() {
   return (
     <main className="shell-page">
       <section className="shell-header">
-        <p className="shell-kicker">Flat Earth Collective</p>
+        <p className="shell-kicker">Flat Earth</p>
         <h1 className="shell-title">
           Decision lanes for shared work. Precise, calm, and visible.
         </h1>

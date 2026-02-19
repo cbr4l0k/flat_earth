@@ -9,7 +9,6 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as PostsRouteImport } from './routes/posts'
 import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthedWorkspaceRouteImport } from './routes/_authed/workspace'
@@ -19,11 +18,6 @@ import { Route as AuthedBoardsRouteImport } from './routes/_authed/boards'
 import { Route as AuthedActivityRouteImport } from './routes/_authed/activity'
 import { Route as AuthedCardsNumberRouteImport } from './routes/_authed/cards.$number'
 
-const PostsRoute = PostsRouteImport.update({
-  id: '/posts',
-  path: '/posts',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AuthedRoute = AuthedRouteImport.update({
   id: '/_authed',
   getParentRoute: () => rootRouteImport,
@@ -66,7 +60,6 @@ const AuthedCardsNumberRoute = AuthedCardsNumberRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/posts': typeof PostsRoute
   '/activity': typeof AuthedActivityRoute
   '/boards': typeof AuthedBoardsRoute
   '/notifications': typeof AuthedNotificationsRoute
@@ -76,7 +69,6 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/posts': typeof PostsRoute
   '/activity': typeof AuthedActivityRoute
   '/boards': typeof AuthedBoardsRoute
   '/notifications': typeof AuthedNotificationsRoute
@@ -88,7 +80,6 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authed': typeof AuthedRouteWithChildren
-  '/posts': typeof PostsRoute
   '/_authed/activity': typeof AuthedActivityRoute
   '/_authed/boards': typeof AuthedBoardsRoute
   '/_authed/notifications': typeof AuthedNotificationsRoute
@@ -100,7 +91,6 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/posts'
     | '/activity'
     | '/boards'
     | '/notifications'
@@ -110,7 +100,6 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/posts'
     | '/activity'
     | '/boards'
     | '/notifications'
@@ -121,7 +110,6 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_authed'
-    | '/posts'
     | '/_authed/activity'
     | '/_authed/boards'
     | '/_authed/notifications'
@@ -133,18 +121,10 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthedRoute: typeof AuthedRouteWithChildren
-  PostsRoute: typeof PostsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/posts': {
-      id: '/posts'
-      path: '/posts'
-      fullPath: '/posts'
-      preLoaderRoute: typeof PostsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/_authed': {
       id: '/_authed'
       path: ''
@@ -228,7 +208,6 @@ const AuthedRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthedRoute: AuthedRouteWithChildren,
-  PostsRoute: PostsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

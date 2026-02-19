@@ -1,6 +1,6 @@
 import { ConvexError, v } from 'convex/values'
 import { mutation, query } from './_generated/server'
-import { MAX_COLUMNS_BY_BOARD } from './constants'
+import { MAX_COLLUMNS_BY_BOARD } from './constants'
 import { requireAccountAccess } from './lib/auth'
 import { canAdministerBoard } from './lib/permissions'
 
@@ -304,6 +304,6 @@ export const canCreateColumn = query({
       .query('columns')
       .withIndex('by_board', (q) => q.eq('boardId', boardId))
       .collect()
-    return count.length < MAX_COLUMNS_BY_BOARD
+    return count.length < MAX_COLLUMNS_BY_BOARD
   },
 })

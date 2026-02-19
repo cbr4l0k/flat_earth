@@ -1,6 +1,6 @@
 import { ConvexError, v } from 'convex/values'
 import { mutation, query } from './_generated/server'
-import { MAX_COLUMNS_BY_BOARD } from './constants'
+import { MAX_COLLUMNS_BY_BOARD } from './constants'
 import { requireAccountAccess } from './lib/auth'
 import {
   isProtectedColumn,
@@ -49,8 +49,8 @@ export const create = mutation({
       .withIndex('by_board_position', (q) => q.eq('boardId', boardId))
       .collect()
 
-    if (columns.length >= MAX_COLUMNS_BY_BOARD) {
-      throw new ConvexError(`Cannot create more than ${MAX_COLUMNS_BY_BOARD} columns`)
+    if (columns.length >= MAX_COLLUMNS_BY_BOARD) {
+      throw new ConvexError(`Cannot create more than ${MAX_COLLUMNS_BY_BOARD} columns`)
     }
 
     const customColumns = columns.filter((column) => !isProtectedColumn(column))
