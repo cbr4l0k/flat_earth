@@ -4,7 +4,10 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery } from 'convex/react'
 import { api } from 'convex/_generated/api'
 import type { Id } from 'convex/_generated/dataModel'
-import { useActiveAccount } from '~/utils/useActiveAccount'
+import {
+  ActiveAccountProvider,
+  useManagedActiveAccount,
+} from '~/utils/useActiveAccount'
 
 export const Route = createFileRoute('/_authed')({
   beforeLoad: ({ context }) => {
@@ -23,7 +26,11 @@ const navLinks = [
 ] as const
 
 function AuthedLayout() {
-  const { accounts, activeAccount, setActiveAccountId } = useActiveAccount()
+  const accounts = useQuery(api.accounts.listMyAccounts, {})
+  const activeAccountState = useManagedActiveAccount(accounts)
+  const { activeAccount, setActiveAccountId } = activeAccountState
+  const accountId = activeAccount?._id
+  const activeBoards = useQuery(api.boards.list, accountId ? { accountId } : 'skip')
   const canBootstrap = useQuery(api.accounts.canBootstrapFirstOwner, {})
   const redeemJoinCode = useMutation(api.accounts.redeemJoinCode)
   const createWithOwner = useMutation(api.accounts.createWithOwner)
@@ -37,6 +44,10 @@ function AuthedLayout() {
   const isLoading = useMemo(
     () => accounts === undefined || canBootstrap === undefined,
     [accounts, canBootstrap],
+  )
+  const providerValue = useMemo(
+    () => ({ ...activeAccountState, activeBoards }),
+    [activeAccountState, activeBoards],
   )
 
   if (isLoading) {
@@ -137,49 +148,57 @@ function AuthedLayout() {
   }
 
   return (
-    <main className="authed-shell">
-      <header className="authed-header">
-        <div>
-          <p className="shell-kicker">Flat Earth Collective</p>
-          <p className="authed-title">Workspace Shell</p>
-        </div>
-        <div className="authed-account-switcher">
-          <label htmlFor="account-switcher">Account</label>
-          <select
-            id="account-switcher"
-            value={activeAccount?._id}
-            onChange={(event) =>
-              setActiveAccountId(event.target.value as Id<'accounts'>)
-            }
-          >
-            {accounts.map((account) => (
-              <option key={account._id} value={account._id}>
-                {account.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <SignedIn>
-          <UserButton />
-        </SignedIn>
-      </header>
+    <ActiveAccountProvider value={providerValue}>
+      <main className="authed-shell">
+        <header className="authed-header">
+          <div className="authed-identity">
+            <p className="shell-kicker">Flat Earth Collective</p>
+            <p className="authed-title">Workspace Shell</p>
+            <p className="authed-subtitle">
+              Mission control for board operations, account activity, and notification flow.
+            </p>
+          </div>
+          <div className="authed-account-switcher">
+            <label htmlFor="account-switcher">Account</label>
+            <select
+              id="account-switcher"
+              value={activeAccount?._id}
+              onChange={(event) =>
+                setActiveAccountId(event.target.value as Id<'accounts'>)
+              }
+            >
+              {accounts.map((account) => (
+                <option key={account._id} value={account._id}>
+                  {account.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <SignedIn>
+            <div className="authed-user">
+              <UserButton />
+            </div>
+          </SignedIn>
+        </header>
 
-      <nav className="authed-nav" aria-label="Primary">
-        {navLinks.map((item) => (
-          <Link
-            key={item.to}
-            to={item.to}
-            className="nav-link"
-            activeProps={{ className: 'nav-link nav-link-active' }}
-          >
-            {item.label}
-          </Link>
-        ))}
-      </nav>
+        <nav className="authed-nav" aria-label="Primary">
+          {navLinks.map((item, index) => (
+            <Link
+              key={item.to}
+              to={item.to}
+              className="nav-link"
+              activeProps={{ className: 'nav-link nav-link-active' }}
+            >
+              <span className="nav-link-index">{String(index + 1).padStart(2, '0')}</span>
+              <span>{item.label}</span>
+            </Link>
+          ))}
+        </nav>
 
-      <section className="authed-content">
-        <Outlet />
-      </section>
-    </main>
+        <section className="authed-content">
+          <Outlet />
+        </section>
+      </main>
+    </ActiveAccountProvider>
   )
 }
