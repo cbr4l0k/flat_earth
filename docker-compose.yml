@@ -1,0 +1,15 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_CONVEX_URL: ${VITE_CONVEX_URL:?set VITE_CONVEX_URL}
+        VITE_CONVEX_SITE_URL: ${VITE_CONVEX_SITE_URL:-}
+        VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY:?set VITE_CLERK_PUBLISHABLE_KEY}
+    image: flat-earth:latest
+    ports:
+      - '${APP_PORT:-3000}:3000'
+    environment:
+      PORT: 3000
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?set CLERK_SECRET_KEY}
