@@ -8,6 +8,21 @@ export default defineSchema({
         cardsCount: v.number(),
     }),
 
+    accountJoinCodes: defineTable({
+        accountId: v.id("accounts"),
+        code: v.string(),
+        createdByUserId: v.id("users"),
+        createdAt: v.number(),
+        expiresAt: v.number(),
+        disabledAt: v.optional(v.number()),
+        usedAt: v.optional(v.number()),
+        usedByUserId: v.optional(v.id("users")),
+    })
+        .index("by_code", ["code"])
+        .index("by_account", ["accountId"])
+        .index("by_account_used", ["accountId", "usedAt"])
+        .index("by_expires_at", ["expiresAt"]),
+
     users: defineTable({
         accountId: v.id("accounts"),
         clerkId: v.string(),
