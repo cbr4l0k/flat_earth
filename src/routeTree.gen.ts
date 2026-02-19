@@ -17,6 +17,7 @@ import { Route as AuthedUserRouteImport } from './routes/_authed/user'
 import { Route as AuthedNotificationsRouteImport } from './routes/_authed/notifications'
 import { Route as AuthedBoardsRouteImport } from './routes/_authed/boards'
 import { Route as AuthedActivityRouteImport } from './routes/_authed/activity'
+import { Route as AuthedCardsNumberRouteImport } from './routes/_authed/cards.$number'
 
 const PostsRoute = PostsRouteImport.update({
   id: '/posts',
@@ -57,6 +58,11 @@ const AuthedActivityRoute = AuthedActivityRouteImport.update({
   path: '/activity',
   getParentRoute: () => AuthedRoute,
 } as any)
+const AuthedCardsNumberRoute = AuthedCardsNumberRouteImport.update({
+  id: '/cards/$number',
+  path: '/cards/$number',
+  getParentRoute: () => AuthedRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -66,6 +72,7 @@ export interface FileRoutesByFullPath {
   '/notifications': typeof AuthedNotificationsRoute
   '/user': typeof AuthedUserRoute
   '/workspace': typeof AuthedWorkspaceRoute
+  '/cards/$number': typeof AuthedCardsNumberRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -75,6 +82,7 @@ export interface FileRoutesByTo {
   '/notifications': typeof AuthedNotificationsRoute
   '/user': typeof AuthedUserRoute
   '/workspace': typeof AuthedWorkspaceRoute
+  '/cards/$number': typeof AuthedCardsNumberRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -86,6 +94,7 @@ export interface FileRoutesById {
   '/_authed/notifications': typeof AuthedNotificationsRoute
   '/_authed/user': typeof AuthedUserRoute
   '/_authed/workspace': typeof AuthedWorkspaceRoute
+  '/_authed/cards/$number': typeof AuthedCardsNumberRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -97,6 +106,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/user'
     | '/workspace'
+    | '/cards/$number'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -106,6 +116,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/user'
     | '/workspace'
+    | '/cards/$number'
   id:
     | '__root__'
     | '/'
@@ -116,6 +127,7 @@ export interface FileRouteTypes {
     | '/_authed/notifications'
     | '/_authed/user'
     | '/_authed/workspace'
+    | '/_authed/cards/$number'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -182,6 +194,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedActivityRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/cards/$number': {
+      id: '/_authed/cards/$number'
+      path: '/cards/$number'
+      fullPath: '/cards/$number'
+      preLoaderRoute: typeof AuthedCardsNumberRouteImport
+      parentRoute: typeof AuthedRoute
+    }
   }
 }
 
@@ -191,6 +210,7 @@ interface AuthedRouteChildren {
   AuthedNotificationsRoute: typeof AuthedNotificationsRoute
   AuthedUserRoute: typeof AuthedUserRoute
   AuthedWorkspaceRoute: typeof AuthedWorkspaceRoute
+  AuthedCardsNumberRoute: typeof AuthedCardsNumberRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
@@ -199,6 +219,7 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedNotificationsRoute: AuthedNotificationsRoute,
   AuthedUserRoute: AuthedUserRoute,
   AuthedWorkspaceRoute: AuthedWorkspaceRoute,
+  AuthedCardsNumberRoute: AuthedCardsNumberRoute,
 }
 
 const AuthedRouteWithChildren =
