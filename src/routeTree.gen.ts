@@ -12,7 +12,11 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as PostsRouteImport } from './routes/posts'
 import { Route as AuthedRouteImport } from './routes/_authed'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthedWorkspaceRouteImport } from './routes/_authed/workspace'
 import { Route as AuthedUserRouteImport } from './routes/_authed/user'
+import { Route as AuthedNotificationsRouteImport } from './routes/_authed/notifications'
+import { Route as AuthedBoardsRouteImport } from './routes/_authed/boards'
+import { Route as AuthedActivityRouteImport } from './routes/_authed/activity'
 
 const PostsRoute = PostsRouteImport.update({
   id: '/posts',
@@ -28,35 +32,90 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthedWorkspaceRoute = AuthedWorkspaceRouteImport.update({
+  id: '/workspace',
+  path: '/workspace',
+  getParentRoute: () => AuthedRoute,
+} as any)
 const AuthedUserRoute = AuthedUserRouteImport.update({
   id: '/user',
   path: '/user',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedNotificationsRoute = AuthedNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedBoardsRoute = AuthedBoardsRouteImport.update({
+  id: '/boards',
+  path: '/boards',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedActivityRoute = AuthedActivityRouteImport.update({
+  id: '/activity',
+  path: '/activity',
   getParentRoute: () => AuthedRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/posts': typeof PostsRoute
+  '/activity': typeof AuthedActivityRoute
+  '/boards': typeof AuthedBoardsRoute
+  '/notifications': typeof AuthedNotificationsRoute
   '/user': typeof AuthedUserRoute
+  '/workspace': typeof AuthedWorkspaceRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/posts': typeof PostsRoute
+  '/activity': typeof AuthedActivityRoute
+  '/boards': typeof AuthedBoardsRoute
+  '/notifications': typeof AuthedNotificationsRoute
   '/user': typeof AuthedUserRoute
+  '/workspace': typeof AuthedWorkspaceRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authed': typeof AuthedRouteWithChildren
   '/posts': typeof PostsRoute
+  '/_authed/activity': typeof AuthedActivityRoute
+  '/_authed/boards': typeof AuthedBoardsRoute
+  '/_authed/notifications': typeof AuthedNotificationsRoute
   '/_authed/user': typeof AuthedUserRoute
+  '/_authed/workspace': typeof AuthedWorkspaceRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/posts' | '/user'
+  fullPaths:
+    | '/'
+    | '/posts'
+    | '/activity'
+    | '/boards'
+    | '/notifications'
+    | '/user'
+    | '/workspace'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/posts' | '/user'
-  id: '__root__' | '/' | '/_authed' | '/posts' | '/_authed/user'
+  to:
+    | '/'
+    | '/posts'
+    | '/activity'
+    | '/boards'
+    | '/notifications'
+    | '/user'
+    | '/workspace'
+  id:
+    | '__root__'
+    | '/'
+    | '/_authed'
+    | '/posts'
+    | '/_authed/activity'
+    | '/_authed/boards'
+    | '/_authed/notifications'
+    | '/_authed/user'
+    | '/_authed/workspace'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -88,6 +147,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authed/workspace': {
+      id: '/_authed/workspace'
+      path: '/workspace'
+      fullPath: '/workspace'
+      preLoaderRoute: typeof AuthedWorkspaceRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/_authed/user': {
       id: '/_authed/user'
       path: '/user'
@@ -95,15 +161,44 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedUserRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/notifications': {
+      id: '/_authed/notifications'
+      path: '/notifications'
+      fullPath: '/notifications'
+      preLoaderRoute: typeof AuthedNotificationsRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/boards': {
+      id: '/_authed/boards'
+      path: '/boards'
+      fullPath: '/boards'
+      preLoaderRoute: typeof AuthedBoardsRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/activity': {
+      id: '/_authed/activity'
+      path: '/activity'
+      fullPath: '/activity'
+      preLoaderRoute: typeof AuthedActivityRouteImport
+      parentRoute: typeof AuthedRoute
+    }
   }
 }
 
 interface AuthedRouteChildren {
+  AuthedActivityRoute: typeof AuthedActivityRoute
+  AuthedBoardsRoute: typeof AuthedBoardsRoute
+  AuthedNotificationsRoute: typeof AuthedNotificationsRoute
   AuthedUserRoute: typeof AuthedUserRoute
+  AuthedWorkspaceRoute: typeof AuthedWorkspaceRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
+  AuthedActivityRoute: AuthedActivityRoute,
+  AuthedBoardsRoute: AuthedBoardsRoute,
+  AuthedNotificationsRoute: AuthedNotificationsRoute,
   AuthedUserRoute: AuthedUserRoute,
+  AuthedWorkspaceRoute: AuthedWorkspaceRoute,
 }
 
 const AuthedRouteWithChildren =
