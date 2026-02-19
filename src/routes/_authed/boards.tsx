@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from 'convex/react'
 import { api } from 'convex/_generated/api'
 import {
@@ -18,13 +18,22 @@ export const Route = createFileRoute('/_authed/boards')({
 })
 
 function BoardsRouteComponent() {
-  const { activeAccount } = useActiveAccount()
+  const { activeAccount, activeBoards } = useActiveAccount()
   const [selectedBoardId, setSelectedBoardId] = useState<Id<'boards'> | null>(null)
   const [mutationError, setMutationError] = useState<string | null>(null)
+  const [expandedCustomLaneId, setExpandedCustomLaneId] = useState<LaneId | null>(null)
+  const [isCreatingCard, setIsCreatingCard] = useState(false)
+  const [selectedCardId, setSelectedCardId] = useState<Id<'cards'> | null>(null)
+  const [cardTitleDraft, setCardTitleDraft] = useState('')
+  const [cardDescriptionDraft, setCardDescriptionDraft] = useState('')
+  const [isSavingCard, setIsSavingCard] = useState(false)
 
   const accountId = activeAccount?._id
-  const boards = useQuery(api.boards.list, accountId ? { accountId } : 'skip')
-  const boardId = selectedBoardId ?? boards?.[0]?._id ?? null
+  const boards = useMemo(
+    () => (activeBoards ?? []).filter((board): board is NonNullable<typeof board> => board !== null),
+    [activeBoards],
+  )
+  const boardId: Id<'boards'> | undefined = selectedBoardId ?? boards[0]?._id
 
   const columns = useQuery(
     api.columns.listByBoard,
@@ -36,6 +45,8 @@ function BoardsRouteComponent() {
   )
 
   const moveToColumn = useMutation(api.cards.moveToColumn)
+  const createCard = useMutation(api.cards.create)
+  const updateCard = useMutation(api.cards.update)
 
   const laneMap = useMemo(() => {
     if (!columns) return []
@@ -85,6 +96,11 @@ function BoardsRouteComponent() {
     return lanes
   }, [columns])
 
+  const customLaneIds = useMemo(
+    () => laneMap.filter((lane) => lane.id.startsWith('column:')).map((lane) => lane.id),
+    [laneMap],
+  )
+
   const cardsByLane = useMemo(() => {
     const map: Record<string, Array<CardDoc>> = {}
     laneMap.forEach((lane) => {
@@ -93,9 +109,6 @@ function BoardsRouteComponent() {
 
     if (allCards) {
       for (const card of allCards) {
-        if (card.status !== 'published') {
-          continue
-        }
         if (card.columnId === null) {
           map.maybe = [...map.maybe, card]
           continue
@@ -116,32 +129,51 @@ function BoardsRouteComponent() {
     return lookup
   }, [allCards])
 
-  if (!activeAccount) {
-    return (
-      <section className="board-page">
-        <header className="page-header">
-          <h1>Boards</h1>
-          <p>No active account yet.</p>
-        </header>
-      </section>
-    )
-  }
+  const publishedCardIds = useMemo(() => {
+    if (!allCards) return ''
+    return allCards
+      .map((card) => card._id)
+      .join('|')
+  }, [allCards])
 
-  if (boards === undefined || columns === undefined || allCards === undefined) {
-    return (
-      <section className="board-page">
-        <header className="page-header">
-          <h1>Boards</h1>
-          <p>Loading board workspace…</p>
-        </header>
-      </section>
-    )
-  }
+  const laneIds = useMemo(() => laneMap.map((lane) => lane.id).join('|'), [laneMap])
 
-  async function dropCardIntoLane(cardId: Id<'cards'>, targetLaneId: LaneId) {
+  const cardLookupRef = useRef(cardLookup)
+  const laneMapRef = useRef(laneMap)
+  const selectedCard = selectedCardId ? cardLookup.get(selectedCardId) ?? null : null
+
+  useEffect(() => {
+    cardLookupRef.current = cardLookup
+  }, [cardLookup])
+
+  useEffect(() => {
+    laneMapRef.current = laneMap
+  }, [laneMap])
+
+  useEffect(() => {
+    if (!selectedCard) {
+      setCardTitleDraft('')
+      setCardDescriptionDraft('')
+      return
+    }
+    setCardTitleDraft(selectedCard.title)
+    setCardDescriptionDraft(selectedCard.description ?? '')
+  }, [selectedCard])
+
+  useEffect(() => {
+    if (customLaneIds.length === 0) {
+      setExpandedCustomLaneId(null)
+      return
+    }
+    if (!expandedCustomLaneId || !customLaneIds.includes(expandedCustomLaneId)) {
+      setExpandedCustomLaneId(customLaneIds[0])
+    }
+  }, [customLaneIds, expandedCustomLaneId, boardId])
+
+  const dropCardIntoLane = useCallback(async (cardId: Id<'cards'>, targetLaneId: LaneId) => {
     if (!boardId || !accountId) return
 
-    const card = cardLookup.get(cardId)
+    const card = cardLookupRef.current.get(cardId)
     if (!card) return
 
     setMutationError(null)
@@ -150,7 +182,9 @@ function BoardsRouteComponent() {
       if (targetLaneId === 'maybe') {
         await moveToColumn({ accountId, cardId: card._id, columnId: null })
       } else if (targetLaneId === 'not-now' || targetLaneId === 'done') {
-        const protectedColumnId = laneMap.find((lane) => lane.id === targetLaneId)?.columnId
+        const protectedColumnId = laneMapRef.current.find(
+          (lane) => lane.id === targetLaneId,
+        )?.columnId
         if (!protectedColumnId) {
           throw new Error('Protected lane is not configured on this board')
         }
@@ -166,7 +200,39 @@ function BoardsRouteComponent() {
     } catch (error) {
       setMutationError(error instanceof Error ? error.message : 'Card move failed')
     }
-  }
+  }, [accountId, boardId, moveToColumn])
+
+  const createCardInMaybe = useCallback(async () => {
+    if (!accountId || !boardId) return
+    setIsCreatingCard(true)
+    setMutationError(null)
+    try {
+      const cardId = await createCard({ accountId, boardId, title: '' })
+      setSelectedCardId(cardId)
+    } catch (error) {
+      setMutationError(error instanceof Error ? error.message : 'Failed to create card')
+    } finally {
+      setIsCreatingCard(false)
+    }
+  }, [accountId, boardId, createCard])
+
+  const saveSelectedCard = useCallback(async () => {
+    if (!accountId || !selectedCardId) return
+    setIsSavingCard(true)
+    setMutationError(null)
+    try {
+      await updateCard({
+        accountId,
+        cardId: selectedCardId,
+        title: cardTitleDraft,
+        description: cardDescriptionDraft,
+      })
+    } catch (error) {
+      setMutationError(error instanceof Error ? error.message : 'Failed to save card')
+    } finally {
+      setIsSavingCard(false)
+    }
+  }, [accountId, selectedCardId, updateCard, cardTitleDraft, cardDescriptionDraft])
 
   useEffect(() => {
     if (!accountId || !boardId) return
@@ -216,15 +282,38 @@ function BoardsRouteComponent() {
     return () => {
       cleanupFns.forEach((cleanup) => cleanup())
     }
-  }, [accountId, boardId, laneMap, cardLookup])
+  }, [accountId, boardId, laneIds, publishedCardIds, dropCardIntoLane])
+
+  if (!activeAccount) {
+    return (
+      <section className="board-page">
+        <header className="page-header">
+          <h1>Boards</h1>
+          <p>No active account yet.</p>
+        </header>
+      </section>
+    )
+  }
+
+  if (columns === undefined || allCards === undefined) {
+    return (
+      <section className="board-page">
+        <header className="page-header">
+          <h1>Boards</h1>
+          <p>Loading board workspace…</p>
+        </header>
+      </section>
+    )
+  }
 
   return (
     <section className="board-page">
       <header className="page-header">
+        <p className="page-eyebrow">Boards</p>
         <h1>Boards</h1>
         <p>
-          Maybe is virtual. Not Now and Done are protected columns. Drag cards
-          across lanes to update status.
+          One-click card creation goes to Maybe. Only one working column stays expanded;
+          Not Now and Done remain protected collapsed rails.
         </p>
       </header>
 
@@ -232,52 +321,130 @@ function BoardsRouteComponent() {
         <label htmlFor="board-select">Board</label>
         <select
           id="board-select"
-          value={boardId ?? ''}
+          value={boardId || ''}
           onChange={(event) => setSelectedBoardId(event.target.value as Id<'boards'>)}
         >
-          {boards
-            .filter((board): board is NonNullable<typeof board> => board !== null)
-            .map((board) => (
-              <option key={board._id} value={board._id}>
-                {board.name}
-              </option>
-            ))}
+          {boards.map((board) => (
+            <option key={board._id} value={board._id}>
+              {board.name}
+            </option>
+          ))}
         </select>
       </div>
 
       {mutationError ? <p className="field-error">{mutationError}</p> : null}
 
-      <div className="lane-grid">
-        {laneMap.map((lane) => (
-          <section
-            key={lane.id}
-            data-lane-id={lane.id}
-            className={`lane ${lane.isProtected ? 'lane-protected' : ''}`}
-          >
-            <header className="lane-header">
-              <h2>{lane.title}</h2>
-              <p>{lane.subtitle}</p>
-              <span>{cardsByLane[lane.id].length}</span>
-            </header>
+      <div className="board-main">
+        <div className="lane-grid">
+          {laneMap.map((lane) => (
+            (() => {
+            const isCustom = lane.id.startsWith('column:')
+            const isExpanded = lane.id === 'maybe' || (isCustom && lane.id === expandedCustomLaneId)
+            const isCollapsedRail = !isExpanded
 
-            <div className="lane-cards">
-              {cardsByLane[lane.id].map((card) => (
-                <article
-                  key={card._id}
-                  data-card-id={card._id}
-                  className="lane-card"
-                >
-                  <h3>{card.title || `Card #${card.number}`}</h3>
-                  <p>#{card.number}</p>
-                </article>
-              ))}
-            </div>
+            return (
+              <section
+                key={lane.id}
+                data-lane-id={lane.id}
+                className={[
+                  'lane',
+                  lane.isProtected ? 'lane-protected' : '',
+                  lane.id === 'maybe' ? 'lane-maybe' : '',
+                  isExpanded ? 'lane-expanded' : 'lane-collapsed',
+                ].join(' ')}
+              >
+                {isCollapsedRail ? (
+                  <button
+                    type="button"
+                    className="lane-collapsed-toggle"
+                    onClick={() => {
+                      if (!isCustom) return
+                      setExpandedCustomLaneId(lane.id)
+                    }}
+                    disabled={!isCustom}
+                  >
+                    <span className="lane-collapsed-count">{cardsByLane[lane.id].length}</span>
+                    <span className="lane-collapsed-title">{lane.title}</span>
+                  </button>
+                ) : (
+                  <>
+                    <header className="lane-header">
+                      <h2>{lane.title}</h2>
+                      <p>{lane.subtitle}</p>
+                      <span>{cardsByLane[lane.id].length}</span>
+                      {lane.id === 'maybe' ? (
+                        <button
+                          type="button"
+                          className="lane-add-card"
+                          onClick={() => void createCardInMaybe()}
+                          disabled={isCreatingCard}
+                        >
+                          {isCreatingCard ? 'Creating…' : 'Add a card'}
+                        </button>
+                      ) : null}
+                    </header>
 
-            {lane.isVirtual ? (
-              <p className="lane-note">Placeholder lane, not persisted as a column.</p>
-            ) : null}
-          </section>
-        ))}
+                    <div className="lane-cards">
+                      {cardsByLane[lane.id].map((card) => (
+                        <article
+                          key={card._id}
+                          data-card-id={card._id}
+                          className="lane-card"
+                          onClick={() => setSelectedCardId(card._id)}
+                        >
+                          <h3>{card.title || `Card #${card.number}`}</h3>
+                          <p>#{card.number}</p>
+                        </article>
+                      ))}
+                    </div>
+
+                    {lane.isVirtual ? (
+                      <p className="lane-note">Virtual triage lane.</p>
+                    ) : null}
+                  </>
+                )}
+              </section>
+            )
+            })()
+          ))}
+        </div>
+
+        <aside className="card-editor">
+          <header className="card-editor-header">
+            <h2>Card Editor</h2>
+            <p>{selectedCard ? `#${selectedCard.number}` : 'Select a card to edit'}</p>
+          </header>
+
+          <label htmlFor="card-title">Title</label>
+          <input
+            id="card-title"
+            value={cardTitleDraft}
+            onChange={(event) => setCardTitleDraft(event.target.value)}
+            disabled={!selectedCard || isSavingCard}
+            placeholder="Card title"
+          />
+
+          <label htmlFor="card-description">Description</label>
+          <textarea
+            id="card-description"
+            value={cardDescriptionDraft}
+            onChange={(event) => setCardDescriptionDraft(event.target.value)}
+            disabled={!selectedCard || isSavingCard}
+            rows={8}
+            placeholder="Add details, decisions, and next actions"
+          />
+
+          <div className="card-editor-actions">
+            <button
+              type="button"
+              className="text-action"
+              onClick={() => void saveSelectedCard()}
+              disabled={!selectedCard || isSavingCard}
+            >
+              {isSavingCard ? 'Saving…' : 'Save card'}
+            </button>
+          </div>
+        </aside>
       </div>
     </section>
   )
