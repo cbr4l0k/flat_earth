@@ -415,6 +415,18 @@
   padding: 0.18rem 0.2rem 0.5rem;
 }
 
+.lane-measurer-grid {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: -1;
+}
+
 .lane {
   border: 1px solid var(--line);
   background: color-mix(in srgb, #fff 76%, var(--panel));

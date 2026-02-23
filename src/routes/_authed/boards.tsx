@@ -35,6 +35,7 @@ function BoardsRouteComponent() {
   const [selectedBoardId, setSelectedBoardId] = useState<Id<'boards'> | null>(null)
   const [mutationError, setMutationError] = useState<string | null>(null)
   const [expandedColumnLaneId, setExpandedColumnLaneId] = useState<LaneId | null>(null)
+  const [collapsedLaneHeights, setCollapsedLaneHeights] = useState<Record<LaneId, number>>({})
   const [isCreatingCard, setIsCreatingCard] = useState(false)
   const [pendingNavigateCardId, setPendingNavigateCardId] = useState<Id<'cards'> | null>(null)
   const [filterQuery, setFilterQuery] = useState('')
@@ -187,6 +188,8 @@ function BoardsRouteComponent() {
   const laneMapRef = useRef(laneMap)
   const cardElementsRef = useRef(new Map<string, HTMLElement>())
   const laneElementsRef = useRef(new Map<string, HTMLElement>())
+  const collapsedMeasureElementsRef = useRef(new Map<string, HTMLElement>())
+  const collapsedMeasureObserverRef = useRef<ResizeObserver | null>(null)
   const isDraggingCardRef = useRef(false)
   const suppressLaneToggleRef = useRef(false)
 
@@ -211,6 +214,22 @@ function BoardsRouteComponent() {
       return null
     })
   }, [columnLaneIds, boardId])
+
+  useEffect(() => {
+    const validLaneIds = new Set(columnLaneIds)
+    setCollapsedLaneHeights((current) => {
+      let changed = false
+      const next: Record<LaneId, number> = {}
+      for (const [laneId, height] of Object.entries(current)) {
+        if (!validLaneIds.has(laneId)) {
+          changed = true
+          continue
+        }
+        next[laneId] = height
+      }
+      return changed ? next : current
+    })
+  }, [columnLaneIds])
 
   useEffect(() => {
     if (!pendingNavigateCardId) return
@@ -389,6 +408,31 @@ function BoardsRouteComponent() {
     laneElementsRef.current.delete(laneId)
   }, [])
 
+  const setCollapsedMeasureElement = useCallback((laneId: string, node: HTMLElement | null) => {
+    const existing = collapsedMeasureElementsRef.current.get(laneId)
+    if (existing === node) return
+
+    if (existing && collapsedMeasureObserverRef.current) {
+      collapsedMeasureObserverRef.current.unobserve(existing)
+    }
+
+    if (!node) {
+      collapsedMeasureElementsRef.current.delete(laneId)
+      return
+    }
+
+    collapsedMeasureElementsRef.current.set(laneId, node)
+    collapsedMeasureObserverRef.current?.observe(node)
+
+    const measuredHeight = Math.ceil(node.getBoundingClientRect().height)
+    if (measuredHeight > 0) {
+      setCollapsedLaneHeights((current) => {
+        if (current[laneId] === measuredHeight) return current
+        return { ...current, [laneId]: measuredHeight }
+      })
+    }
+  }, [])
+
   const visibleCardIdsKey = useMemo(
     () =>
       laneMap
@@ -401,6 +445,42 @@ function BoardsRouteComponent() {
     () => `${expandedColumnLaneId ?? 'none'}|${isAddColumnOpen ? 'add-open' : 'add-closed'}`,
     [expandedColumnLaneId, isAddColumnOpen],
   )
+
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return
+
+    const observer = new ResizeObserver((entries) => {
+      setCollapsedLaneHeights((current) => {
+        let changed = false
+        const next = { ...current }
+
+        for (const entry of entries) {
+          const laneId = (entry.target as HTMLElement).dataset.measureLaneId
+          if (!laneId) continue
+
+          const measuredHeight = Math.ceil(entry.contentRect.height)
+          if (measuredHeight <= 0 || next[laneId] === measuredHeight) continue
+
+          next[laneId] = measuredHeight
+          changed = true
+        }
+
+        return changed ? next : current
+      })
+    })
+
+    collapsedMeasureObserverRef.current = observer
+    for (const element of collapsedMeasureElementsRef.current.values()) {
+      observer.observe(element)
+    }
+
+    return () => {
+      observer.disconnect()
+      if (collapsedMeasureObserverRef.current === observer) {
+        collapsedMeasureObserverRef.current = null
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (!accountId || !boardId) return
@@ -542,9 +622,14 @@ function BoardsRouteComponent() {
                   lane.kind === 'custom-column' ? 'lane-custom' : '',
                 ].join(' ')}
                 style={
-                  lane.kind === 'custom-column' && lane.color
-                    ? ({ '--lane-accent': lane.color } as CSSProperties)
-                    : undefined
+                  {
+                    ...(lane.kind === 'custom-column' && lane.color
+                      ? { '--lane-accent': lane.color }
+                      : {}),
+                    ...(isRail && collapsedLaneHeights[lane.id]
+                      ? { minHeight: collapsedLaneHeights[lane.id] }
+                      : {}),
+                  } as CSSProperties
                 }
                 onClick={(event) => {
                   if (lane.kind === 'virtual-maybe') return
@@ -712,6 +797,54 @@ function BoardsRouteComponent() {
               </form>
             )}
           </section>
+        </div>
+        <div className="lane-measurer-grid" aria-hidden="true">
+          {laneMap
+            .filter((lane) => lane.kind !== 'virtual-maybe' && lane.id !== expandedColumnLaneId)
+            .map((lane) => {
+              const laneCards = cardsByLane[lane.id] ?? []
+              return (
+                <section
+                  key={`measure:${lane.id}`}
+                  ref={(node) => setCollapsedMeasureElement(lane.id, node)}
+                  data-measure-lane-id={lane.id}
+                  className={[
+                    'lane',
+                    'lane-expanded',
+                    lane.kind.startsWith('protected-') ? 'lane-protected' : '',
+                    lane.kind === 'custom-column' ? 'lane-custom' : '',
+                  ].join(' ')}
+                  style={
+                    lane.kind === 'custom-column' && lane.color
+                      ? ({ '--lane-accent': lane.color } as CSSProperties)
+                      : undefined
+                  }
+                >
+                  <header className="lane-header">
+                    <h2>{lane.title}</h2>
+                    <button type="button" className="lane-collapse" tabIndex={-1} disabled>
+                      Collapse
+                    </button>
+                    <span>{laneCards.length}</span>
+                  </header>
+
+                  <div className="lane-cards">
+                    {laneCards.map((card) => (
+                      <article key={card._id} className="lane-card">
+                        <h3>{card.title || `Card #${card.number}`}</h3>
+                        <p className="lane-card-number">#{card.number}</p>
+                        <div className="lane-card-metrics">
+                          {card.isGolden ? <span>Gold</span> : null}
+                          {card.dueOn ? <span>Due {card.dueOn}</span> : null}
+                          {card.postponedAt ? <span>Postponed</span> : null}
+                          {card.closedAt ? <span>Done</span> : null}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              )
+            })}
         </div>
 
         {isConfigOpen ? (
