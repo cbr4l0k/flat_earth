@@ -78,30 +78,12 @@
     );
 }
 
-.grid-overlay {
-  position: fixed;
-  inset: 0;
-  background-image:
-    linear-gradient(to right, transparent 95.8%, rgba(17, 16, 15, 0.1) 95.8%),
-    linear-gradient(to bottom, transparent 95.8%, rgba(17, 16, 15, 0.05) 95.8%);
-  background-size:
-    92px 92px,
-    92px 92px;
-  pointer-events: none;
-  opacity: 0.3;
-}
-
 .app-frame {
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: clamp(1rem, 1.4vw, 1.5rem);
   position: relative;
 }
 
 .shell-page {
-  border: 1px solid var(--line);
-  background: var(--panel);
-  min-height: calc(100vh - 2.5rem);
+  min-height: 100vh;
   display: grid;
   grid-template-rows: auto 1fr;
   gap: 1.4rem;
@@ -197,9 +179,7 @@
 }
 
 .authed-shell {
-  border: 1px solid var(--line);
-  background: var(--panel);
-  min-height: calc(100vh - 2.5rem);
+  min-height: 100vh;
   padding: clamp(0.9rem, 1.4vw, 1.5rem);
   display: grid;
   grid-template-rows: auto 1fr;
@@ -889,9 +869,7 @@
   letter-spacing: 0.09em;
 }
 
-.card-page {
-  border: 1px solid
-    color-mix(in srgb, var(--card-column-accent, var(--accent)) 38%, var(--line));
+.app-body.card-accent-active {
   background:
     radial-gradient(
       circle at 20% 15%,
@@ -903,6 +881,9 @@
       color-mix(in srgb, var(--card-column-accent, var(--accent)) 36%, #fff) 0%,
       color-mix(in srgb, var(--card-column-accent, var(--accent)) 18%, var(--panel)) 100%
     );
+}
+
+.card-page {
   padding: 1rem;
   justify-items: center;
   align-content: start;
@@ -1130,13 +1111,9 @@
 }
 
 @media (max-width: 760px) {
-  .app-frame {
-    padding: 0.75rem;
-  }
-
   .shell-page,
   .authed-shell {
-    min-height: calc(100vh - 1.5rem);
+    min-height: 100vh;
     padding: 0.86rem;
   }
 

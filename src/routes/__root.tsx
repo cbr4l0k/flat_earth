@@ -117,7 +117,6 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body className="app-body">
-        <div aria-hidden className="grid-overlay" />
         <div className="app-frame">
           {children}
         </div>

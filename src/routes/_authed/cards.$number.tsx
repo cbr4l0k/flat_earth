@@ -2,7 +2,7 @@ import { Link, createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from 'convex/react'
 import { api } from 'convex/_generated/api'
-import type { CSSProperties, KeyboardEvent } from 'react'
+import type { KeyboardEvent } from 'react'
 import { useActiveAccount } from '~/utils/useActiveAccount'
 
 export const Route = createFileRoute('/_authed/cards/$number')({
@@ -45,6 +45,15 @@ function CardDetailRouteComponent() {
     const column = columns?.find((candidate) => candidate._id === card.columnId)
     return column?.color ?? '#c4492b'
   }, [card, columns])
+
+  useEffect(() => {
+    document.body.style.setProperty('--card-column-accent', editorAccent)
+    document.body.classList.add('card-accent-active')
+    return () => {
+      document.body.style.removeProperty('--card-column-accent')
+      document.body.classList.remove('card-accent-active')
+    }
+  }, [editorAccent])
 
   async function onSave(): Promise<boolean> {
     if (!accountId || !card) return false
@@ -121,10 +130,7 @@ function CardDetailRouteComponent() {
   }
 
   return (
-    <section
-      className="simple-page card-page"
-      style={{ '--card-column-accent': editorAccent } as CSSProperties}
-    >
+    <section className="simple-page card-page">
       <header className="page-header">
         <p className="page-eyebrow">Card</p>
         <h1>#{card.number}</h1>
